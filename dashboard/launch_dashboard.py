@@ -78,7 +78,7 @@ def main() -> None:
         "--theme.primaryColor", "#7c6af7",
         "--theme.textColor", "#d0d0dc",
     ])
-
+#here we are calling our main function
 
 if __name__ == "__main__":
     main()

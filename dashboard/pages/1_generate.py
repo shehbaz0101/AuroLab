@@ -59,7 +59,7 @@ EXAMPLES = [
     "Perform a BCA protein assay on 8 samples using a 96-well plate at 562nm",
     "Run a standard 35-cycle PCR protocol for a 500bp amplicon with Taq polymerase",
     "Prepare a serial dilution of BSA standard from 2000 µg/mL to 25 µg/mL for ELISA",
-    "Execute a western blot transfer protocol for proteins between 15–250 kDa",
+    "Execute a western blot transfer protocol for the proteins between 15–250 kDa",
     "Prepare competent E. coli cells using calcium chloride method",
 ]
 
