@@ -12,8 +12,8 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..core.analytics_engine import AnalyticsEngine
-from ..core.analytics_models import AggregateAnalytics, EfficiencyReport
+from services.analytics_service.core.analytics_engine import AnalyticsEngine
+from services.analytics_service.core.analytics_models import AggregateAnalytics, EfficiencyReport
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/analytics", tags=["Analytics"])

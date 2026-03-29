@@ -32,9 +32,12 @@ from .isaac_sim_bridge import IsaacSimBridge, SimMode
 
 # Vision layer — optional import, graceful fallback if vision package not on path
 try:
-    from vision_service.core.lab_state import LabState
+    from services.vision_service.core.lab_state import LabState
 except ImportError:
-    LabState = None  # type: ignore[assignment,misc]
+    try:
+        from vision_service.core.lab_state import LabState  # fallback for alternate layouts
+    except ImportError:
+        LabState = None  # type: ignore[assignment,misc]
 
 log = structlog.get_logger(__name__)
 
@@ -153,8 +156,12 @@ def execute_protocol(
 
 def _estimate_duration(commands: list[RobotCommand]) -> float:
     """Sum estimated durations, adding 2s overhead per command for robot movement."""
-    return sum(getattr(cmd, "duration_s", 0) or getattr(cmd, "estimated_duration_s", 2.0)
-               for cmd in commands) + len(commands) * 2.0
+    total = 0.0
+    for cmd in commands:
+        duration_s = getattr(cmd, "duration_s", None)
+        estimated  = getattr(cmd, "estimated_duration_s", None)
+        total += float(duration_s or estimated or 2.0)
+    return total + len(commands) * 2.0
 
 
 def _insert_pause_at_collision(

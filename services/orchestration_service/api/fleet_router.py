@@ -15,8 +15,8 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from ..core.fleet_models import RobotAgent, RobotStatus
-from ..core.scheduler import RobotFleet
+from services.orchestration_service.core.fleet_models import RobotAgent, RobotStatus
+from services.orchestration_service.core.scheduler import RobotFleet
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/fleet", tags=["Fleet Orchestration"])

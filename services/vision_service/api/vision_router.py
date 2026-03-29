@@ -13,8 +13,8 @@ import structlog
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel
 
-from ..core.lab_state import LabState
-from ..core.vision_engine import VisionEngine
+from services.vision_service.core.lab_state import LabState
+from services.vision_service.core.vision_engine import VisionEngine
 
 log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/vision", tags=["Vision"])

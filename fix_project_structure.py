@@ -151,11 +151,33 @@ def verify_critical_files():
         SERVICES / "translation_service" / "main.py",
         SERVICES / "translation_service" / "core" / "rag_engine.py",
         SERVICES / "translation_service" / "core" / "llm_engine.py",
+        SERVICES / "translation_service" / "core" / "chunker.py",
+        SERVICES / "translation_service" / "core" / "pdf_parser.py",
+        SERVICES / "translation_service" / "core" / "registry.py",
+        SERVICES / "translation_service" / "core" / "document_loader.py",
+        SERVICES / "translation_service" / "core" / "protocol_manager.py",
+        SERVICES / "translation_service" / "core" / "translation_service.py",
+        SERVICES / "translation_service" / "api" / "routes.py",
+        SERVICES / "translation_service" / "config" / "settings.py",
         SERVICES / "execution_service" / "core" / "robot_commands.py",
         SERVICES / "execution_service" / "core" / "orchestrator.py",
+        SERVICES / "execution_service" / "core" / "step_parser.py",
+        SERVICES / "execution_service" / "core" / "validator.py",
+        SERVICES / "execution_service" / "core" / "isaac_sim_bridge.py",
+        SERVICES / "execution_service" / "core" / "pybullet_sim.py",
         SERVICES / "vision_service" / "core" / "lab_state.py",
+        SERVICES / "vision_service" / "core" / "vision_engine.py",
         SERVICES / "analytics_service" / "core" / "analytics_engine.py",
+        SERVICES / "analytics_service" / "core" / "analytics_models.py",
         SERVICES / "orchestration_service" / "core" / "scheduler.py",
+        SERVICES / "orchestration_service" / "core" / "fleet_models.py",
+        SERVICES / "orchestration_service" / "core" / "resource_lock_manager.py",
+        SERVICES / "rl_service" / "core" / "rl_engine.py",
+        SERVICES / "rl_service" / "core" / "telemetry_store.py",
+        ROOT / "shared" / "exceptions.py",
+        ROOT / "shared" / "logger.py",
+        ROOT / "shared" / "middleware.py",
+        ROOT / "shared" / "response.py",
     ]
     print("\n  Checking critical files:")
     all_ok = True
@@ -165,45 +187,57 @@ def verify_critical_files():
         print(f"  [{status}] {f.relative_to(ROOT)}")
         if not exists:
             all_ok = False
-
-    missing_rl = not (SERVICES / "rl_service" / "core" / "rl_engine.py").exists()
-    if missing_rl:
-        print("\n  [MISS] services/rl_service/ — copy from downloaded files")
-        all_ok = False
-
     return all_ok
+
+
+def install_main():
+    """Replace translation_service/main.py with the production version."""
+    src = ROOT / "main_final.py"
+    dst = SERVICES / "translation_service" / "main.py"
+    if src.exists() and dst.exists():
+        import shutil
+        shutil.copy2(src, dst)
+        print(f"  Replaced {dst.relative_to(ROOT)} with main_final.py")
 
 
 if __name__ == "__main__":
     print("\n=== AuroLab Project Structure Fix ===\n")
 
-    print("[1/7] Creating __init__.py files...")
+    print("[1/8] Creating __init__.py files...")
     create_init_files()
 
-    print("\n[2/7] Fixing execution_router imports...")
+    print("\n[2/8] Fixing execution_router imports...")
     fix_execution_router()
 
-    print("\n[3/7] Fixing vision_router imports...")
+    print("\n[3/8] Fixing vision_router imports...")
     fix_vision_router()
 
-    print("\n[4/7] Fixing analytics_router imports...")
+    print("\n[4/8] Fixing analytics_router imports...")
     fix_analytics_router()
 
-    print("\n[5/7] Fixing fleet_router imports...")
+    print("\n[5/8] Fixing fleet_router imports...")
     fix_fleet_router()
 
-    print("\n[6/7] Fixing rl_router imports...")
+    print("\n[6/8] Fixing rl_router imports...")
     fix_rl_router()
 
-    print("\n[7/7] Fixing orchestrator vision import...")
+    print("\n[7/8] Fixing orchestrator vision import...")
     fix_orchestrator()
+
+    print("\n[8/8] Installing production main.py...")
+    install_main()
 
     print("\n=== Verifying critical files ===")
     ok = verify_critical_files()
 
     print("\n=== Done ===")
     if ok:
-        print("All files present. Run: pytest tests/ -v")
+        print("All files present.")
+        print("\nNext steps:")
+        print("  python scripts/validate_startup.py --fix")
+        print("  python mock_test.py")
+        print("  pytest tests/ -v")
     else:
-        print("Some files missing — copy them from the downloaded phase files.")
-        print("Then run: pytest tests/ -v")
+        print("Some files missing — copy them from the downloaded phase files, then re-run.")
+        print("See COPY_GUIDE.md for exact file placement.")
+        import sys; sys.exit(1)

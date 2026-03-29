@@ -94,9 +94,16 @@ def _parse_rpm(text: str) -> int | None:
         return None
     raw = m.group(1).replace(",", "")
     val = int(raw)
-    # Convert × g to approximate RPM (1000 × g ≈ 5900 RPM for standard microcentrifuge)
-    if "g" in text[m.start():m.end()].lower() or "×" in text[m.start():m.end()]:
-        val = int(val * 5.9)
+    # Convert × g to RPM using standard microcentrifuge radius (~9cm)
+    # RPM = sqrt(RCF / (1.118 × 10⁻⁵ × r)) where r=9cm
+    # Simplified: RCF × g → RPM ≈ RCF * 0.95 for typical lab centrifuge
+    # Hard cap at 30000 RPM (CentrifugeCommand max)
+    segment = text[m.start():m.end()]
+    if re.search(r"×\s*g|x\s*g|\bxg\b|rcf\b", segment, re.IGNORECASE):
+        # × g values are already RCF — convert to approximate RPM
+        # 1000 × g ≈ 5900 RPM for r=9cm rotor
+        # but cap is 30000, so clamp before returning
+        val = min(int(val * 0.95), 30000)
     return min(val, 30000)
 
 
@@ -168,7 +175,7 @@ def _try_pipette_transfer(instruction: str, step_num: int, idx_start: int) -> Pa
 
 
 def _try_centrifuge(instruction: str, step_num: int, idx_start: int) -> ParseResult | None:
-    if not re.search(r"\b(?:centrifug|spin|pellet)\b", instruction, re.IGNORECASE):
+    if not re.search(r"(?:centrifug|spin down|pellet)", instruction, re.IGNORECASE):
         return None
     rpm = _parse_rpm(instruction) or 13000
     dur = _parse_duration_s(instruction) or 600
@@ -177,19 +184,18 @@ def _try_centrifuge(instruction: str, step_num: int, idx_start: int) -> ParseRes
 
 
 def _try_incubate(instruction: str, step_num: int, idx_start: int) -> ParseResult | None:
-    if not re.search(r"\b(?:incubat|warm|cool|chill|freez|thaw|heat)\b", instruction, re.IGNORECASE):
+    if not re.search(r"(?:incubat|warm up|cool down|chill|freez|thaw|heat)", instruction, re.IGNORECASE):
         return None
     temp = _parse_temp_c(instruction)
     dur = _parse_duration_s(instruction) or 1800
     slot = _parse_slot(instruction, default=7)
     if temp is None:
-        # Try common patterns: "at 37°C", "on ice" → 4°C, "room temperature" → 22°C
-        if re.search(r"\bon\s+ice\b", instruction, re.IGNORECASE):
+        if re.search(r"on\s+ice", instruction, re.IGNORECASE):
             temp = 4.0
-        elif re.search(r"\broom\s+temp", instruction, re.IGNORECASE):
+        elif re.search(r"room\s+temp", instruction, re.IGNORECASE):
             temp = 22.0
         else:
-            temp = 37.0   # default for most biological incubations
+            temp = 37.0
     return [{"type": "incubate", "temperature_celsius": temp, "duration_s": dur, "slot": slot}]
 
 
@@ -327,13 +333,9 @@ def parse_step(
         result = parser(instruction, step_number, idx)
         if result:
             for cmd_dict in result:
-                try:
-                    cmd = _build_command(cmd_dict, idx, step_number)
-                    commands.append(cmd)
-                    idx += 1
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("command_build_failed",
-                                step=step_number, type=cmd_dict.get("type"), error=str(exc))
+                cmd = _build_command(cmd_dict, idx, step_number)
+                commands.append(cmd)
+                idx += 1
             log.debug("step_parsed",
                       step=step_number,
                       parser=parser.__name__,

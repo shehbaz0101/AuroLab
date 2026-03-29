@@ -53,11 +53,12 @@ log = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 class SimMode(str, Enum):
-    LIVE = "live"
-    MOCK = "mock"
+    LIVE     = "live"      # Isaac Sim via ZMQ (requires GPU + Omniverse)
+    PYBULLET = "pybullet"  # PyBullet physics (CPU only, recommended)
+    MOCK     = "mock"      # Software heuristics (no physics, fastest)
 
 
-SIM_MODE = SimMode(os.getenv("AUROLAB_SIM_MODE", "mock").lower())
+SIM_MODE = SimMode(os.getenv("AUROLAB_SIM_MODE", "pybullet").lower())
 ISAAC_HOST = os.getenv("ISAAC_SIM_HOST", "localhost")
 ISAAC_PORT = int(os.getenv("ISAAC_SIM_PORT", "5555"))
 SIM_TIMEOUT_S = float(os.getenv("ISAAC_SIM_TIMEOUT", "120"))
@@ -187,7 +188,7 @@ def _run_mock_simulation(
     }
 
     for cmd in commands:
-        frames += int(getattr(cmd, "duration_s", 1) * 30)  # 30 fps simulation
+        frames += int((getattr(cmd, "duration_s", None) or 1) * 30)  # 30 fps simulation
 
         # Tip tracking
         if isinstance(cmd, PickUpTipCommand):
@@ -333,7 +334,11 @@ class IsaacSimBridge:
         log.info("sim_start", mode=self.mode.value, commands=len(commands))
         t0 = time.perf_counter()
 
-        if self.mode == SimMode.LIVE:
+        if self.mode == SimMode.PYBULLET:
+            from .pybullet_sim import run_pybullet_simulation
+            result = run_pybullet_simulation(commands, labware_map=self._labware_map)
+
+        elif self.mode == SimMode.LIVE:
             try:
                 raw = _send_to_isaac(commands)
                 result = SimulationResult(
@@ -346,10 +351,12 @@ class IsaacSimBridge:
                     frames_simulated=raw.get("frames_simulated", 0),
                 )
             except (ConnectionError, RuntimeError) as exc:
-                log.warning("isaac_sim_unreachable", error=str(exc), fallback="mock")
-                result = _run_mock_simulation(commands, labware_map=self._labware_map)
+                log.warning("isaac_sim_unreachable", error=str(exc), fallback="pybullet")
+                from .pybullet_sim import run_pybullet_simulation
+                result = run_pybullet_simulation(commands, labware_map=self._labware_map)
                 result.telemetry["fallback_reason"] = str(exc)
         else:
+            # MOCK mode
             result = _run_mock_simulation(commands, labware_map=self._labware_map)
 
         elapsed = time.perf_counter() - t0
