@@ -118,11 +118,19 @@ async def generate_protocol(
             detail=str(exc),
         ) from exc
     except RuntimeError as exc:
-        # LLM failure
+        # LLM failure — log full error and return it in detail for debugging
         log.error("generate_failed", protocol_id=protocol_id, error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Protocol generation temporarily unavailable. Please retry.",
+            detail=f"Protocol generation failed: {exc}",
+        ) from exc
+    except Exception as exc:
+        # Catch-all — surfaces unexpected errors instead of hiding them
+        log.error("generate_unexpected", protocol_id=protocol_id,
+                  error=type(exc).__name__, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Unexpected error ({type(exc).__name__}): {exc}",
         ) from exc
 
     # Store in protocol registry for later retrieval

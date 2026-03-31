@@ -1,13 +1,5 @@
 """
-shared/logger.py
-
-Structured logging configuration for AuroLab.
-Uses structlog with JSON output in production, human-readable in development.
-
-Usage (in any service):
-    from shared.logger import get_logger
-    log = get_logger(__name__)
-    log.info("event_name", key="value", count=42)
+shared/logger.py  -  Structured logging for AuroLab.
 """
 
 from __future__ import annotations
@@ -21,39 +13,24 @@ import structlog
 
 def configure_logging() -> None:
     """
-    Call once at application startup (in main.py lifespan).
-    Sets up structlog processors for the chosen environment.
+    Call once at startup in main.py lifespan.
+    
+    NOTE: add_logger_name is intentionally excluded from processors.
+    It only works with stdlib LoggerFactory, not PrintLoggerFactory,
+    and raises: AttributeError: 'PrintLogger' object has no attribute 'name'
     """
-    env = os.getenv("ENV", "prod").lower()
+    env       = os.getenv("ENV", "prod").lower()
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
-    # Shared processors for all environments
-    shared_processors = [
+    processors = [
         structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.TimeStamper(fmt="%H:%M:%S"),
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.dev.ConsoleRenderer(colors=(env == "dev")),
     ]
-
-    if env == "dev":
-        # Human-readable coloured output for development
-        processors = shared_processors + [
-            structlog.dev.ConsoleRenderer(colors=True),
-        ]
-        formatter = structlog.stdlib.ProcessorFormatter(
-            processor=structlog.dev.ConsoleRenderer(colors=True),
-        )
-    else:
-        # JSON output for production (log aggregators, CloudWatch, etc.)
-        processors = shared_processors + [
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer(),
-        ]
-        formatter = structlog.stdlib.ProcessorFormatter(
-            processor=structlog.processors.JSONRenderer(),
-        )
 
     structlog.configure(
         processors=processors,
@@ -65,18 +42,15 @@ def configure_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    # Also configure stdlib logging to route through structlog
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(formatter)
-    root_logger = logging.getLogger()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(log_level)
-
-    # Silence noisy third-party loggers
-    for noisy in ["httpx", "httpcore", "chromadb", "urllib3", "multipart"]:
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=getattr(logging, log_level, logging.INFO),
+    )
+    for noisy in ["httpx", "httpcore", "chromadb", "urllib3",
+                  "multipart", "uvicorn.access"]:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> structlog.BoundLogger:
-    """Get a bound logger for a module."""
     return structlog.get_logger(name)

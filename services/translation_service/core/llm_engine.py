@@ -378,7 +378,8 @@ class AurolabLLMEngine:
 
         for attempt, model in enumerate(models[:MAX_RETRIES], start=1):
             try:
-                resp = self._groq.chat.completions.create(
+                # json_object mode only works on some Groq models — try with it first
+                kwargs = dict(
                     model=model,
                     messages=[
                         {"role": "system", "content": system},
@@ -386,8 +387,16 @@ class AurolabLLMEngine:
                     ],
                     max_tokens=MAX_TOKENS,
                     temperature=TEMPERATURE,
-                    response_format={"type": "json_object"},  # Groq JSON mode
                 )
+                # Attempt with JSON mode first
+                try:
+                    resp = self._groq.chat.completions.create(
+                        **kwargs, response_format={"type": "json_object"}
+                    )
+                except Exception:
+                    # Fall back to plain completion if JSON mode unsupported
+                    resp = self._groq.chat.completions.create(**kwargs)
+
                 content = resp.choices[0].message.content
                 log.debug("llm_call_success", attempt=attempt, model=model, chars=len(content))
                 return content

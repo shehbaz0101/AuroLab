@@ -312,8 +312,12 @@ class AurolabRAGEngine:
 
         reranked = []
         for r in results[:top_k]:
-            original = candidates[r.id]
-            original["rerank_score"] = r.score
+            # FlashRank returns either an object with .id/.score
+            # or a dict with ["id"]/["score"] depending on version
+            rid   = int(r["id"]    if isinstance(r, dict) else r.id)
+            score = float(r["score"] if isinstance(r, dict) else r.score)
+            original = candidates[rid]
+            original["rerank_score"] = score
             reranked.append(original)
 
         return reranked
