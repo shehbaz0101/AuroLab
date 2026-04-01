@@ -8,51 +8,18 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
-st.set_page_config(page_title="Fleet — AuroLab", page_icon="⚗", layout="wide")
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared import inject_css, render_nav, hero, api_get, api_post, api_delete, kpi_row, divider, section_label, badge, stats_strip, neon_card, render_step_card, render_protocol_header, export_buttons, PLOTLY_DARK
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
-[data-testid="stSidebar"] { background: #0d0d0f; border-right: 1px solid #1f1f23; }
-.main .block-container { padding-top: 2rem; max-width: 1280px; }
-h1,h2,h3 { font-family:'IBM Plex Sans',sans-serif; font-weight:600; letter-spacing:-0.02em; }
-.section-divider { border:none; border-top:1px solid #1a1a22; margin:24px 0; }
-.robot-card { background:#0d0d12; border:1px solid #1a1a22; border-radius:8px; padding:14px 16px; margin:4px 0; }
-.robot-name { font-size:0.92em; color:#d0d0dc; font-weight:500; }
-.robot-meta { font-family:'IBM Plex Mono',monospace; font-size:0.74em; color:#555568; margin-top:3px; }
-.status-idle    { color:#22c55e; font-family:'IBM Plex Mono',monospace; font-size:0.76em; }
-.status-running { color:#60a5fa; font-family:'IBM Plex Mono',monospace; font-size:0.76em; }
-.status-error   { color:#ef4444; font-family:'IBM Plex Mono',monospace; font-size:0.76em; }
-.metric-box { background:#0d0d0f; border:1px solid #1f1f2a; border-radius:8px; padding:14px 18px; text-align:center; }
-.metric-value { font-family:'IBM Plex Mono',monospace; font-size:1.8em; font-weight:500; color:#a78bfa; line-height:1.1; }
-.metric-label { font-size:0.72em; color:#666680; text-transform:uppercase; letter-spacing:0.1em; margin-top:4px; }
-.conflict-row { background:#1f1408; border:1px solid #78350f; border-radius:4px; padding:6px 12px; margin:4px 0; font-size:0.82em; color:#fbbf24; }
-.resolved-row  { background:#0a1f12; border:1px solid #166534; border-radius:4px; padding:6px 12px; margin:4px 0; font-size:0.82em; color:#22c55e; }
-</style>
-""", unsafe_allow_html=True)
+
+st.set_page_config(page_title="Fleet — AuroLab", page_icon="⚗", layout="wide", initial_sidebar_state="collapsed")
+inject_css()
+render_nav("fleet")
+
 
 API_BASE = "http://localhost:8080"
-
-def api_get(path):
-    try:
-        r = httpx.get(f"{API_BASE}{path}", timeout=10.0)
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return None
-
-def api_post(path, **kwargs):
-    try:
-        r = httpx.post(f"{API_BASE}{path}", timeout=15.0, **kwargs)
-        r.raise_for_status()
-        return r.json()
-    except httpx.HTTPStatusError as e:
-        st.error(f"API {e.response.status_code}: {e.response.json().get('detail', str(e))}")
-        return None
-    except Exception as e:
-        st.error(f"Connection error: {e}")
-        return None
 
 ROBOT_COLORS = {
     "robot_01": "#7c6af7",
@@ -64,7 +31,7 @@ ROBOT_COLORS = {
 # ---------------------------------------------------------------------------
 st.markdown("## Fleet Orchestration")
 st.markdown("Schedule multiple protocols across the robot fleet with automatic conflict detection and resolution.")
-st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
 left_col, right_col = st.columns([2, 3], gap="large")
 
@@ -80,9 +47,9 @@ with left_col:
     else:
         robots = fleet_status.get("robots", [])
         m1, m2, m3 = st.columns(3)
-        m1.markdown(f'<div class="metric-box"><div class="metric-value">{len(robots)}</div><div class="metric-label">Robots</div></div>', unsafe_allow_html=True)
-        m2.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#22c55e">{fleet_status.get("idle_robots",0)}</div><div class="metric-label">Idle</div></div>', unsafe_allow_html=True)
-        m3.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#60a5fa">{fleet_status.get("active_tasks",0)}</div><div class="metric-label">Running</div></div>', unsafe_allow_html=True)
+        m1.markdown(f'<div class="kpi-card"><div class="kpi-value">{len(robots)}</div><div class="kpi-label">Robots</div></div>', unsafe_allow_html=True)
+        m2.markdown(f'<div class="kpi-card"><div class="kpi-value" style="color:#22c55e">{fleet_status.get("idle_robots",0)}</div><div class="kpi-label">Idle</div></div>', unsafe_allow_html=True)
+        m3.markdown(f'<div class="kpi-card"><div class="kpi-value" style="color:#60a5fa">{fleet_status.get("active_tasks",0)}</div><div class="kpi-label">Running</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         for robot in robots:
@@ -101,7 +68,7 @@ with left_col:
             </div>
             """, unsafe_allow_html=True)
 
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
     st.markdown("#### Schedule protocols")
 
     # Get plans from execution plan store (via fleet/status not available — use history)
@@ -129,7 +96,7 @@ with left_col:
                 st.success(f"Schedule built — {result.get('task_count',0)} tasks, {result.get('makespan_min',0):.1f} min makespan")
                 st.rerun()
 
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
     st.markdown("#### Add robot")
     with st.expander("Add a robot to the fleet"):
         new_id   = st.text_input("Robot ID", placeholder="robot_03")
@@ -159,7 +126,7 @@ with right_col:
         st.markdown("""
         <div style='text-align:center; padding:64px; color:#444458;'>
             <div style='font-size:2em; margin-bottom:12px;'>🤖</div>
-            <div style='font-family:IBM Plex Mono,monospace; font-size:0.85em;'>No schedule computed yet.</div>
+            <div style='font-family:JetBrains Mono,monospace; font-size:0.85em;'>No schedule computed yet.</div>
             <div style='font-size:0.8em; margin-top:6px;'>Select protocols and click Build schedule.</div>
         </div>
         """, unsafe_allow_html=True)
@@ -171,11 +138,11 @@ with right_col:
 
         # Summary metrics
         s1, s2, s3 = st.columns(3)
-        s1.markdown(f'<div class="metric-box"><div class="metric-value">{len(tasks)}</div><div class="metric-label">Tasks</div></div>', unsafe_allow_html=True)
-        s2.markdown(f'<div class="metric-box"><div class="metric-value">{makespan:.1f}m</div><div class="metric-label">Makespan</div></div>', unsafe_allow_html=True)
+        s1.markdown(f'<div class="kpi-card"><div class="kpi-value">{len(tasks)}</div><div class="kpi-label">Tasks</div></div>', unsafe_allow_html=True)
+        s2.markdown(f'<div class="kpi-card"><div class="kpi-value">{makespan:.1f}m</div><div class="kpi-label">Makespan</div></div>', unsafe_allow_html=True)
         conflict_free = schedule.get("is_conflict_free", True)
         cf_color = "#22c55e" if conflict_free else "#f59e0b"
-        s3.markdown(f'<div class="metric-box"><div class="metric-value" style="color:{cf_color}">{"✓" if conflict_free else len(conflicts)}</div><div class="metric-label">{"Conflict free" if conflict_free else "Conflicts"}</div></div>', unsafe_allow_html=True)
+        s3.markdown(f'<div class="kpi-card"><div class="kpi-value" style="color:{cf_color}">{"✓" if conflict_free else len(conflicts)}</div><div class="kpi-label">{"Conflict free" if conflict_free else "Conflicts"}</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### Gantt — task timeline")
@@ -215,7 +182,7 @@ with right_col:
         fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="#0a0a0e",
-            font=dict(family="IBM Plex Mono, monospace", color="#888898", size=10),
+            font=dict(family="JetBrains Mono, monospace", color="#888898", size=10),
             xaxis=dict(title="Minutes from schedule start", gridcolor="#1a1a22",
                        linecolor="#2a2a38", tickfont=dict(color="#666680")),
             yaxis=dict(gridcolor="#1a1a22", linecolor="#2a2a38",
@@ -241,7 +208,7 @@ with right_col:
             util_fig.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="#0a0a0e",
-                font=dict(family="IBM Plex Mono, monospace", color="#888898", size=10),
+                font=dict(family="JetBrains Mono, monospace", color="#888898", size=10),
                 xaxis=dict(gridcolor="#1a1a22"),
                 yaxis=dict(range=[0, 110], title="Utilisation %", gridcolor="#1a1a22"),
                 height=200,
@@ -272,11 +239,11 @@ with right_col:
             robot_color = ROBOT_COLORS.get(robot_id, "#888898")
             rows.append(
                 f"<tr>"
-                f"<td style='font-family:IBM Plex Mono,monospace; color:#7c6af7; padding:6px 12px;'>{t['task_id']}</td>"
+                f"<td style='font-family:JetBrains Mono,monospace; color:#7c6af7; padding:6px 12px;'>{t['task_id']}</td>"
                 f"<td style='color:#c0c0cc; padding:6px 12px;'>{t['protocol_title'][:28]}</td>"
-                f"<td style='font-family:IBM Plex Mono,monospace; color:{robot_color}; padding:6px 12px;'>{robot_id}</td>"
-                f"<td style='font-family:IBM Plex Mono,monospace; color:#888898; padding:6px 12px;'>{start_min:.1f}m</td>"
-                f"<td style='font-family:IBM Plex Mono,monospace; color:#888898; padding:6px 12px;'>{t['duration_min']:.1f}m</td>"
+                f"<td style='font-family:JetBrains Mono,monospace; color:{robot_color}; padding:6px 12px;'>{robot_id}</td>"
+                f"<td style='font-family:JetBrains Mono,monospace; color:#888898; padding:6px 12px;'>{start_min:.1f}m</td>"
+                f"<td style='font-family:JetBrains Mono,monospace; color:#888898; padding:6px 12px;'>{t['duration_min']:.1f}m</td>"
                 f"</tr>"
             )
         st.markdown(f"""

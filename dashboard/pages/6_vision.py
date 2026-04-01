@@ -6,35 +6,16 @@ import streamlit as st
 import httpx
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Vision — AuroLab", page_icon="⚗", layout="wide")
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared import inject_css, render_nav, hero, api_get, api_post, api_delete, kpi_row, divider, section_label, badge, stats_strip, neon_card, render_step_card, render_protocol_header, export_buttons, PLOTLY_DARK
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
-[data-testid="stSidebar"] { background: #0d0d0f; border-right: 1px solid #1f1f23; }
-.main .block-container { padding-top: 2rem; max-width: 1280px; }
-h1,h2,h3 { font-family:'IBM Plex Sans',sans-serif; font-weight:600; letter-spacing:-0.02em; }
-.section-divider { border:none; border-top:1px solid #1a1a22; margin:24px 0; }
-.slot-card { background:#0d0d12; border:1px solid #1a1a22; border-radius:6px; padding:10px 12px; margin:3px; text-align:center; }
-.slot-occupied { border-color:#7c6af7; }
-.slot-attention { border-color:#f59e0b; }
-.slot-empty { border-color:#1a1a22; opacity:0.5; }
-.slot-num { font-family:'IBM Plex Mono',monospace; font-size:0.7em; color:#555568; margin-bottom:4px; }
-.slot-type { font-size:0.78em; color:#c0c0cc; font-weight:500; }
-.slot-conf { font-family:'IBM Plex Mono',monospace; font-size:0.68em; color:#555568; margin-top:3px; }
-.fill-full     { color:#22c55e; }
-.fill-high     { color:#4ade80; }
-.fill-medium   { color:#facc15; }
-.fill-low      { color:#fb923c; }
-.fill-critical { color:#ef4444; font-weight:500; }
-.fill-empty    { color:#444458; }
-.warning-row { background:#1f1408; border:1px solid #78350f; border-radius:4px; padding:6px 12px; margin:4px 0; font-size:0.84em; color:#fbbf24; }
-.badge-groq   { background:#0a1a2e; color:#60a5fa; border:1px solid #1e40af; padding:2px 8px; border-radius:3px; font-family:'IBM Plex Mono',monospace; font-size:0.72em; }
-.badge-llava  { background:#0a2e1a; color:#22c55e; border:1px solid #166534; padding:2px 8px; border-radius:3px; font-family:'IBM Plex Mono',monospace; font-size:0.72em; }
-.badge-mock   { background:#1a1a2e; color:#a78bfa; border:1px solid #534AB7; padding:2px 8px; border-radius:3px; font-family:'IBM Plex Mono',monospace; font-size:0.72em; }
-</style>
-""", unsafe_allow_html=True)
+
+st.set_page_config(page_title="Vision — AuroLab", page_icon="⚗", layout="wide", initial_sidebar_state="collapsed")
+inject_css()
+render_nav("vision")
+
 
 API_BASE = "http://localhost:8080"
 FILL_CLASSES = {
@@ -46,26 +27,6 @@ FILL_SYMBOLS = {
     "full": "████", "high": "███░", "medium": "██░░",
     "low": "█░░░", "critical": "▌░░░", "empty": "░░░░", "unknown": "????",
 }
-
-def api_get(path):
-    try:
-        r = httpx.get(f"{API_BASE}{path}", timeout=10.0)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        return None
-
-def api_post(path, **kwargs):
-    try:
-        r = httpx.post(f"{API_BASE}{path}", timeout=30.0, **kwargs)
-        r.raise_for_status()
-        return r.json()
-    except httpx.HTTPStatusError as e:
-        st.error(f"API {e.response.status_code}: {e.response.json().get('detail', str(e))}")
-        return None
-    except Exception as e:
-        st.error(f"Connection error: {e}")
-        return None
 
 def slot_css_class(slot_num: int, state: dict) -> str:
     lmap = state.get("labware_map", {})
@@ -79,7 +40,7 @@ def slot_css_class(slot_num: int, state: dict) -> str:
 # ---------------------------------------------------------------------------
 st.markdown("## Vision — Lab State Detection")
 st.markdown("Detect and inspect what labware is currently on the robot deck. Upload a real image or inject a mock scenario.")
-st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
 left_col, right_col = st.columns([2, 3], gap="large")
 
@@ -123,7 +84,7 @@ with left_col:
             st.session_state.vision_state = result
             st.rerun()
 
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+    st.markdown('<hr class="divider">', unsafe_allow_html=True)
     st.markdown("#### How it works")
     st.markdown("""
     <div style='font-size:0.84em; color:#888898; line-height:1.9;'>
@@ -147,7 +108,7 @@ with right_col:
         st.markdown("""
         <div style='text-align:center; padding:64px; color:#444458;'>
             <div style='font-size:2em; margin-bottom:12px;'>🔬</div>
-            <div style='font-family:IBM Plex Mono,monospace; font-size:0.85em;'>No lab state detected yet.</div>
+            <div style='font-family:JetBrains Mono,monospace; font-size:0.85em;'>No lab state detected yet.</div>
             <div style='font-size:0.8em; margin-top:6px;'>Inject a mock scenario or upload an image.</div>
         </div>
         """, unsafe_allow_html=True)
@@ -163,7 +124,7 @@ with right_col:
         # Header metrics
         badge_cls = {"groq": "badge-groq", "llava": "badge-llava", "mock": "badge-mock"}.get(source, "badge-mock")
         st.markdown(f"<span class='{badge_cls}'>{source.upper()}</span> &nbsp; "
-                    f"<span style='font-family:IBM Plex Mono,monospace; font-size:0.82em; color:#a78bfa;'>{conf:.0%} confidence</span> &nbsp; "
+                    f"<span style='font-family:JetBrains Mono,monospace; font-size:0.82em; color:#a78bfa;'>{conf:.0%} confidence</span> &nbsp; "
                     f"<span style='font-size:0.82em; color:#555568;'>{len(occupied)} occupied · {len(attention)} need attention</span>",
                     unsafe_allow_html=True)
 
@@ -216,7 +177,7 @@ with right_col:
             fig.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="#0a0a0e",
-                font=dict(family="IBM Plex Mono, monospace", color="#888898", size=10),
+                font=dict(family="JetBrains Mono, monospace", color="#888898", size=10),
                 xaxis=dict(gridcolor="#1a1a22", tickfont=dict(color="#555568", size=9)),
                 yaxis=dict(visible=False),
                 height=160,
@@ -231,7 +192,7 @@ with right_col:
             rows = []
             for slot_str, ltype in sorted(lmap.items(), key=lambda x: int(x[0])):
                 attn_flag = "⚠" if int(slot_str) in attention else ""
-                rows.append(f"<tr><td style='font-family:IBM Plex Mono,monospace; color:#7c6af7;'>Slot {slot_str}</td>"
+                rows.append(f"<tr><td style='font-family:JetBrains Mono,monospace; color:#7c6af7;'>Slot {slot_str}</td>"
                             f"<td style='color:#c0c0cc;'>{ltype.replace('_',' ')}</td>"
                             f"<td style='color:#f59e0b;'>{attn_flag}</td></tr>")
             st.markdown(f"""

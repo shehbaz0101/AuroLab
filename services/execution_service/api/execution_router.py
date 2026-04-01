@@ -61,7 +61,9 @@ def _plan_to_summary(plan: ExecutionPlan) -> ExecutionSummaryResponse:
 async def execute(body: ExecuteRequest, request: Request) -> ExecutionSummaryResponse:
     plan_store: dict = request.app.state.execution_plan_store
 
-    mode = SimMode.LIVE if body.sim_mode == "live" else SimMode.MOCK
+    mode = SimMode.LIVE if body.sim_mode == "live" else (
+        SimMode.PYBULLET if body.sim_mode == "pybullet" else SimMode.MOCK
+    )
 
     try:
         plan = execute_protocol(
@@ -78,6 +80,59 @@ async def execute(body: ExecuteRequest, request: Request) -> ExecutionSummaryRes
 
     plan_store[plan.plan_id] = plan
     return _plan_to_summary(plan)
+
+
+@router.post(
+    "/execute/{protocol_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Execute a previously generated protocol by ID",
+)
+async def execute_by_id(
+    protocol_id: str,
+    request: Request,
+    sim_mode: str = "mock",
+    auto_correct: bool = True,
+) -> dict:
+    """Look up a protocol from the registry and simulate it."""
+    registry: dict = request.app.state.protocol_registry
+    protocol = registry.get(protocol_id)
+    if not protocol:
+        raise HTTPException(status_code=404,
+            detail=f"Protocol {protocol_id} not found. Generate it first on the Generate page.")
+
+    mode = SimMode.LIVE if sim_mode == "live" else (
+        SimMode.PYBULLET if sim_mode == "pybullet" else SimMode.MOCK
+    )
+    try:
+        if hasattr(protocol, "model_dump"):
+            proto_dict = protocol.model_dump(mode="json")
+        else:
+            proto_dict = dict(protocol)
+
+        plan = execute_protocol(
+            protocol=proto_dict,
+            sim_mode=mode,
+            auto_correct=auto_correct,
+        )
+    except Exception as exc:
+        log.error("execute_by_id_failed", protocol_id=protocol_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Simulation failed: {exc}",
+        ) from exc
+
+    plan_store: dict = request.app.state.execution_plan_store
+    plan_store[plan.plan_id] = plan
+
+    summary = _plan_to_summary(plan)
+    return {
+        **summary.__dict__,
+        "protocol_id": protocol_id,
+        "sim_mode": sim_mode,
+        "passed": plan.simulation_result.passed if plan.simulation_result else False,
+        "physics_engine": getattr(plan.simulation_result, "telemetry", {}).get(
+            "physics_engine", sim_mode) if plan.simulation_result else sim_mode,
+    }
 
 
 @router.get(

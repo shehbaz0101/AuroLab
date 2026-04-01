@@ -1,158 +1,149 @@
-"""
-dashboard/pages/4_history.py — Protocol History
-"""
+"""dashboard/pages/4_history.py — Protocol History"""
 
-import json
+import json, sys
+from pathlib import Path
 import streamlit as st
 
-st.set_page_config(page_title="History — AuroLab", page_icon="⚗", layout="wide")
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from shared import inject_css, render_nav, hero, api_get, api_post, api_delete, kpi_row, kpi_card, page_header, divider, section_label, badge, stats_strip, neon_card, render_step_card, render_protocol_header, export_buttons, PLOTLY_DARK
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; }
-[data-testid="stSidebar"] { background: #0d0d0f; border-right: 1px solid #1f1f23; }
-.main .block-container { padding-top: 2rem; max-width: 1280px; }
-h1,h2,h3 { font-family:'IBM Plex Sans',sans-serif; font-weight:600; letter-spacing:-0.02em; }
-.hist-row { background:#0d0d12; border:1px solid #1a1a22; border-radius:6px; padding:12px 16px; margin:5px 0; cursor:pointer; transition:border-color 0.15s; }
-.hist-row:hover { border-color:#2a2a3a; }
-.hist-title { font-size:0.94em; color:#d8d8e4; font-weight:500; }
-.hist-meta { font-family:'IBM Plex Mono',monospace; font-size:0.74em; color:#555568; margin-top:3px; }
-.badge-safe    { background:#0a2e1a; color:#22c55e; border:1px solid #166534; padding:1px 8px; border-radius:3px; font-family:'IBM Plex Mono',monospace; font-size:0.72em; }
-.badge-warning { background:#2e1f0a; color:#f59e0b; border:1px solid #92400e; padding:1px 8px; border-radius:3px; font-family:'IBM Plex Mono',monospace; font-size:0.72em; }
-.step-card { background:#111115; border:1px solid #1f1f28; border-left:3px solid #7c6af7; border-radius:6px; padding:12px 16px; margin:6px 0; }
-.step-number { font-family:'IBM Plex Mono',monospace; color:#7c6af7; font-size:0.76em; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:3px; }
-.step-citation { font-family:'IBM Plex Mono',monospace; font-size:0.70em; color:#5a8a6a; margin-top:5px; }
-.section-divider { border:none; border-top:1px solid #1a1a22; margin:24px 0; }
-.conf-bar-bg { background:#1a1a24; border-radius:4px; height:5px; width:100%; }
-.conf-bar-fg { background:linear-gradient(90deg,#7c6af7,#a78bfa); border-radius:4px; height:5px; }
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="History — AuroLab", page_icon="⚗", layout="wide", initial_sidebar_state="collapsed")
+inject_css()
+render_nav("history")
 
-# ---------------------------------------------------------------------------
-st.markdown("## Protocol History")
-st.markdown("All protocols generated in this session. Protocols persist in memory until the server restarts.")
-st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+page_header("Protocol History", "All generated protocols — search, compare, re-simulate, export.")
+divider()
 
-history: list[dict] = st.session_state.get("protocol_history", [])
+session_hist = st.session_state.get("protocol_history", [])
+api_data = api_get("/api/v1/protocols/", silent=True) or {}
+api_protos = api_data.get("protocols", [])
+session_ids = {p.get("protocol_id") for p in session_hist}
+history = session_hist + [p for p in api_protos if p.get("protocol_id") not in session_ids]
 
 if not history:
     st.markdown("""
-    <div style='text-align:center; padding:64px; color:#444458;'>
-        <div style='font-size:2em; margin-bottom:12px;'>🗂</div>
-        <div style='font-family:IBM Plex Mono,monospace; font-size:0.85em;'>No protocols generated yet.</div>
-        <div style='font-size:0.8em; margin-top:6px;'>Head to Generate to create your first protocol.</div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    # Toolbar
-    tcol1, tcol2, tcol3 = st.columns([2, 1, 1])
-    with tcol1:
-        search = st.text_input("Search protocols", placeholder="Filter by title or instruction…", label_visibility="collapsed")
-    with tcol2:
-        safety_filter = st.selectbox("Safety", ["All", "safe", "warning", "blocked"], label_visibility="collapsed")
-    with tcol3:
-        st.download_button(
-            "Export all JSON",
-            data=json.dumps(history, indent=2),
-            file_name="aurolab_protocols_all.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+    <div style="text-align:center;padding:5rem;color:#444458;">
+        <div style="font-size:2.5rem;margin-bottom:1rem;">🗂</div>
+        <div style="font-family:'JetBrains Mono',monospace;">No protocols generated yet</div>
+        <div style="font-size:0.8rem;margin-top:6px;">Head to Generate to create your first protocol</div>
+    </div>""", unsafe_allow_html=True)
+    st.stop()
 
-    # Filter
-    filtered = history
-    if search:
-        q = search.lower()
-        filtered = [p for p in filtered if q in p.get("title", "").lower() or q in p.get("description", "").lower()]
-    if safety_filter != "All":
-        filtered = [p for p in filtered if p.get("safety_level") == safety_filter]
+# ── Toolbar ────────────────────────────────────────────────────────────────
+tc1, tc2, tc3, tc4 = st.columns([3, 1, 1, 1])
+with tc1:
+    search = st.text_input("Search", placeholder="Title, description, or step instruction...", label_visibility="collapsed")
+with tc2:
+    safety_f = st.selectbox("Safety", ["All","safe","warning","blocked"], label_visibility="collapsed")
+with tc3:
+    sort_by = st.selectbox("Sort", ["Newest","Confidence ↓","Steps ↓"], label_visibility="collapsed")
+with tc4:
+    st.download_button("⬇ All JSON", data=json.dumps(history, indent=2),
+        file_name="aurolab_all_protocols.json", mime="application/json", use_container_width=True)
 
-    st.markdown(f"<div style='font-size:0.82em; color:#555568; margin:8px 0;'>{len(filtered)} of {len(history)} protocols</div>", unsafe_allow_html=True)
+filtered = history
+if search:
+    q = search.lower()
+    filtered = [p for p in filtered if q in p.get("title","").lower()
+                or q in p.get("description","").lower()
+                or any(q in s.get("instruction","").lower() for s in p.get("steps",[]))]
+if safety_f != "All":
+    filtered = [p for p in filtered if p.get("safety_level") == safety_f]
+if sort_by == "Confidence ↓":
+    filtered = sorted(filtered, key=lambda p: p.get("confidence_score",0), reverse=True)
+elif sort_by == "Steps ↓":
+    filtered = sorted(filtered, key=lambda p: len(p.get("steps",[])), reverse=True)
 
-    list_col, detail_col = st.columns([2, 3], gap="large")
+# ── Summary KPIs ──────────────────────────────────────────────────────────
+avg_conf  = sum(p.get("confidence_score",0) for p in history) / max(len(history),1)
+avg_steps = sum(len(p.get("steps",[])) for p in history) / max(len(history),1)
+safe_ct   = sum(1 for p in history if p.get("safety_level")=="safe")
+avg_ms    = sum(p.get("generation_ms",0) for p in history) / max(len(history),1)
 
-    with list_col:
-        for i, p in enumerate(filtered):
-            safety = p.get("safety_level", "safe")
-            badge_cls = f"badge-{safety}"
-            conf = p.get("confidence_score", 0)
-            pid = p.get("protocol_id", "")[:8]
-            steps_n = len(p.get("steps", []))
-            gen_ms = p.get("generation_ms", 0)
+kpi_row([
+    (f"{avg_conf:.0%}", 'Avg confidence', '#4ade80'),
+    (f"{avg_steps:.1f}", 'Avg steps', '#60a5fa'),
+    (f"{avg_ms:.0f}ms", 'Avg gen time', '#fbbf24'),
+    (safe_ct, 'Safe protocols', '#4ade80'),
+])
+st.markdown(f"<div style='font-size:0.72rem;color:#555568;margin:8px 0;font-family:JetBrains Mono,monospace;'>{len(filtered)} / {len(history)} protocols</div>", unsafe_allow_html=True)
+divider()
 
-            if st.button(
-                f"{p.get('title', 'Untitled')}",
-                key=f"hist_{i}",
-                use_container_width=True,
-            ):
-                st.session_state.history_selected = i
+list_col, detail_col = st.columns([2, 3], gap="large")
 
-            st.markdown(f"""
-            <div class='hist-meta' style='margin-top:-10px; margin-bottom:8px; padding-left:4px;'>
-                {steps_n} steps · {conf:.0%} confidence · {gen_ms:.0f}ms · <span class='{badge_cls}'>{safety}</span>
-            </div>
-            """, unsafe_allow_html=True)
+with list_col:
+    section_label("Protocols")
+    for i, p in enumerate(filtered):
+        safety = p.get("safety_level","safe")
+        conf   = p.get("confidence_score",0)
+        steps  = len(p.get("steps",[]))
+        ms     = p.get("generation_ms",0)
+        is_sel = st.session_state.get("history_selected",0) == i
+        border = "#7c6af7" if is_sel else "rgba(255,255,255,0.06)"
+        bg     = "#0f0f18" if is_sel else "#0c0c14"
+        if st.button(p.get("title","Untitled"), key=f"h_{i}", use_container_width=True):
+            st.session_state.history_selected = i
+        st.markdown(f"""
+        <div style="margin-top:-12px;margin-bottom:8px;padding:0 4px;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:0.68rem;color:#555568;">{steps}st · {conf:.0%} · {ms:.0f}ms · </span>
+            <span class="badge badge-{safety}">{safety}</span>
+        </div>""", unsafe_allow_html=True)
 
-    with detail_col:
-        sel = st.session_state.get("history_selected", 0)
-        if filtered and sel < len(filtered):
-            p = filtered[sel]
-            safety = p.get("safety_level", "safe")
-            badge_cls = f"badge-{safety}"
-            conf = p.get("confidence_score", 0)
+with detail_col:
+    sel = st.session_state.get("history_selected", 0)
+    if filtered and sel < len(filtered):
+        p = filtered[sel]
+        render_protocol_header(p)
+        for note in p.get("safety_notes",[]):
+            st.markdown(f"<div class='step-safety'>⚠ {note}</div>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-            st.markdown(f"### {p.get('title','Untitled')}")
-            st.markdown(f"<span class='{badge_cls}'>{safety.upper()}</span>&nbsp; <span style='font-size:0.84em; color:#888898;'>{p.get('description','')}</span>", unsafe_allow_html=True)
+        tab_steps, tab_reagents, tab_sources, tab_sim = st.tabs(["Steps","Reagents & Equipment","Sources","Re-simulate"])
 
-            # Confidence bar
-            st.markdown(f"""
-            <div style='margin:10px 0 16px;'>
-                <div class='conf-bar-bg'><div class='conf-bar-fg' style='width:{int(conf*100)}%'></div></div>
-                <div style='font-family:IBM Plex Mono,monospace; font-size:0.76em; color:#a78bfa; margin-top:3px;'>{conf:.0%} confidence · {p.get("model_used","")}</div>
-            </div>
-            """, unsafe_allow_html=True)
+        with tab_steps:
+            for step in p.get("steps",[]):
+                render_step_card(step)
 
-            # Steps
-            for step in p.get("steps", []):
-                cites = ", ".join(step.get("citations", [])) or "GENERAL"
-                meta = []
-                if step.get("duration_seconds"):
-                    m, s = divmod(step["duration_seconds"], 60)
-                    meta.append(f"{m}m {s}s" if m else f"{s}s")
-                if step.get("temperature_celsius") is not None:
-                    meta.append(f"{step['temperature_celsius']}°C")
-                if step.get("volume_ul") is not None:
-                    meta.append(f"{step['volume_ul']} µL")
-                meta_str = " · ".join(meta)
+        with tab_reagents:
+            if p.get("reagents"):
+                section_label("Reagents")
+                for r in p["reagents"]:
+                    st.markdown(f"<div style='padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:0.85rem;color:#c0c0d0;'>· {r}</div>", unsafe_allow_html=True)
+            if p.get("equipment"):
+                st.markdown("<br>", unsafe_allow_html=True)
+                section_label("Equipment")
+                for eq in p["equipment"]:
+                    st.markdown(f"<div style='padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:0.85rem;color:#c0c0d0;'>· {eq}</div>", unsafe_allow_html=True)
 
-                st.markdown(f"""
-                <div class='step-card'>
-                    <div class='step-number'>Step {step['step_number']}{' · ' + meta_str if meta_str else ''}</div>
-                    <div style='color:#e0e0ea; line-height:1.6; font-size:0.9em;'>{step['instruction']}</div>
-                    <div class='step-citation'>cite: {cites}</div>
-                </div>
-                """, unsafe_allow_html=True)
+        with tab_sources:
+            if p.get("sources_used"):
+                for src in p["sources_used"]:
+                    pct = int(src.get("score",0)*100)
+                    st.markdown(f"""
+                    <div class="source-card">
+                        <div class="source-id">{src.get('source_id','')}</div>
+                        <div class="source-file">{src.get('filename','')}</div>
+                        <div class="source-meta">{src.get('section','') or '—'} · p.{src.get('page_start','?')} · relevance {pct}%</div>
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown("<span style='color:#555568;font-size:0.82rem;'>No source data for this protocol.</span>", unsafe_allow_html=True)
 
-            # Export
-            st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
-            ecol1, ecol2 = st.columns(2)
-            with ecol1:
-                st.download_button(
-                    "Export JSON",
-                    data=json.dumps(p, indent=2),
-                    file_name=f"protocol_{p.get('protocol_id','')[:8]}.json",
-                    mime="application/json",
-                    use_container_width=True,
-                )
-            with ecol2:
-                lines = [f"# {p['title']}", p.get("description", ""), ""]
-                for step in p.get("steps", []):
-                    lines.append(f"[{step['step_number']}] {step['instruction']}")
-                st.download_button(
-                    "Export TXT",
-                    data="\n".join(lines),
-                    file_name=f"protocol_{p.get('protocol_id','')[:8]}.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
+        with tab_sim:
+            sm = st.selectbox("Physics engine", ["mock","pybullet","live"], key="hist_sm")
+            if st.button("▶ Run simulation", type="primary", use_container_width=True):
+                pid = p.get("protocol_id","")
+                with st.spinner(f"Simulating via {sm}..."):
+                    res = api_post(f"/api/v1/execute/{pid}", json={"sim_mode":sm}, silent=True)
+                if res:
+                    passed = res.get("passed", res.get("simulation_passed", False))
+                    cls = "sim-pass" if passed else "sim-fail"
+                    col = "#4ade80" if passed else "#f87171"
+                    cmds = res.get("command_count", res.get("commands_executed","?"))
+                    st.markdown(f"""
+                    <div class="{cls}">
+                        <span class="sim-text" style="color:{col};">{'✓ PASSED' if passed else '✗ FAILED'}</span>
+                        <span class="sim-text" style="color:#555568;margin-left:12px;">{cmds} commands · {sm}</span>
+                    </div>""", unsafe_allow_html=True)
+
+        divider()
+        export_buttons(p, key_prefix=f"h_{sel}")
