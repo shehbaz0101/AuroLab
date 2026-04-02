@@ -166,3 +166,25 @@ if "last_protocol" in st.session_state:
 
     divider()
     export_buttons(p, key_prefix="gen")
+
+    # ── Opentrons OT-2 export ─────────────────────────────────────────────────
+    try:
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
+        ot2_script = export_opentrons_script(p)
+        ot2_col, _ = st.columns([1, 3])
+        with ot2_col:
+            st.download_button(
+                "⬇ OT-2 Python Script",
+                data=ot2_script,
+                file_name=f"aurolab_{p.get('protocol_id','x')[:8]}.py",
+                mime="text/x-python",
+                key="gen_ot2",
+                help="Load in Opentrons App → calibrate → run on OT-2",
+            )
+        st.markdown(
+            '<div style="font-family:JetBrains Mono,monospace;font-size:0.62rem;'
+            'color:rgba(160,185,205,0.3);margin-top:2px;">'
+            '// Runnable on physical OT-2 — load in Opentrons App</div>',
+            unsafe_allow_html=True)
+    except ImportError:
+        pass
