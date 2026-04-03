@@ -37,8 +37,99 @@ class ProtocolManager:
     For multi-worker deployments, replace self._store with Redis.
     """
 
-    def __init__(self) -> None:
-        self._store: dict[str, dict] = {}   # protocol_id → protocol dict
+    def __init__(self, db_path: str = "./data/protocols.db") -> None:
+        self._store: dict[str, dict] = {}   # protocol_id → protocol dict (in-memory cache)
+        self._db_path = db_path
+        self._init_db()
+        self._load_from_db()
+
+    def _init_db(self) -> None:
+        """Initialise SQLite persistence for protocol history."""
+        import sqlite3
+        from pathlib import Path
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS protocols (
+                    protocol_id TEXT PRIMARY KEY,
+                    title       TEXT,
+                    safety_level TEXT,
+                    confidence  REAL,
+                    steps       INTEGER,
+                    saved_at    REAL,
+                    data        TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS protocol_versions (
+                    version_id     TEXT PRIMARY KEY,
+                    protocol_id    TEXT,
+                    version_num    INTEGER,
+                    parent_id      TEXT,
+                    saved_at       REAL,
+                    change_reason  TEXT,
+                    data           TEXT
+                )
+            """)
+
+    def _load_from_db(self) -> None:
+        """Load all protocols from SQLite into in-memory store on startup."""
+        import sqlite3, json
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute("SELECT data FROM protocols ORDER BY saved_at DESC").fetchall()
+            for (data_json,) in rows:
+                try:
+                    d = json.loads(data_json)
+                    self._store[d["protocol_id"]] = d
+                except Exception:
+                    pass
+            log.info("protocols_loaded_from_db", count=len(self._store))
+        except Exception as e:
+            log.warning("db_load_failed", error=str(e))
+
+    def _persist(self, data: dict) -> None:
+        """Persist a protocol to SQLite."""
+        import sqlite3, json
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO protocols
+                    (protocol_id, title, safety_level, confidence, steps, saved_at, data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    data.get("protocol_id",""),
+                    data.get("title",""),
+                    data.get("safety_level","safe"),
+                    data.get("confidence_score",0),
+                    len(data.get("steps",[])),
+                    data.get("saved_at",0),
+                    json.dumps(data),
+                ))
+        except Exception as e:
+            log.warning("db_persist_failed", error=str(e))
+
+    def _persist_delete(self, protocol_id: str) -> None:
+        import sqlite3
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("DELETE FROM protocols WHERE protocol_id=?", (protocol_id,))
+        except Exception:
+            pass
+
+    def get_versions(self, protocol_id: str) -> list[dict]:
+        """Get version history for a protocol."""
+        import sqlite3, json
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute("""
+                    SELECT version_id, version_num, parent_id, saved_at, change_reason, data
+                    FROM protocol_versions WHERE protocol_id=? ORDER BY version_num DESC
+                """, (protocol_id,)).fetchall()
+            return [{"version_id":r[0],"version_num":r[1],"parent_id":r[2],
+                     "saved_at":r[3],"change_reason":r[4]} for r in rows]
+        except Exception:
+            return []
 
     # ------------------------------------------------------------------
     # Write
@@ -61,12 +152,14 @@ class ProtocolManager:
 
         data.setdefault("saved_at", time.time())
         self._store[pid] = data
+        self._persist(data)
         log.info("protocol_saved", protocol_id=pid, title=data.get("title", ""))
 
     def delete(self, protocol_id: str) -> bool:
         """Delete a protocol. Returns True if it existed."""
         if protocol_id in self._store:
             del self._store[protocol_id]
+            self._persist_delete(protocol_id)
             log.info("protocol_deleted", protocol_id=protocol_id)
             return True
         return False

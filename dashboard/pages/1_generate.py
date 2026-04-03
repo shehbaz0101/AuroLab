@@ -28,8 +28,21 @@ left, right = st.columns([3, 2], gap="large")
 
 with left:
     section_label("Input instruction")
+
+    # ── Template quick-fill ─────────────────────────────────────────────────
+    if st.session_state.get("template_instruction"):
+        tmpl_instr = st.session_state.pop("template_instruction")
+        tmpl_name  = st.session_state.pop("template_name", "Template")
+        st.markdown(f"""
+        <div style="background:rgba(0,184,255,0.06);border:1px solid rgba(0,184,255,0.2);
+            border-radius:8px;padding:8px 14px;margin-bottom:8px;font-size:0.8rem;color:#93c5fd;">
+            📐 Pre-filled from template: <strong>{tmpl_name}</strong> — edit as needed
+        </div>""", unsafe_allow_html=True)
+    else:
+        tmpl_instr = None
+
     ex = st.selectbox("Example", ["— enter custom instruction —"] + EXAMPLES, label_visibility="collapsed")
-    default = "" if ex.startswith("—") else ex
+    default = tmpl_instr if tmpl_instr else ("" if ex.startswith("—") else ex)
     instruction = st.text_area("Instruction", value=default, height=110,
         placeholder="e.g. Perform a BCA protein assay on 8 samples at 562nm...",
         label_visibility="collapsed")
@@ -169,7 +182,7 @@ if "last_protocol" in st.session_state:
 
     # ── Opentrons OT-2 export ─────────────────────────────────────────────────
     try:
-        from services.translation_service.core.opentrons_exporter import export_opentrons_script
+        from core.opentrons_exporter import export_opentrons_script
         ot2_script = export_opentrons_script(p)
         ot2_col, _ = st.columns([1, 3])
         with ot2_col:

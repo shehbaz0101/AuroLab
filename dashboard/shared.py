@@ -275,69 +275,93 @@ def render_nav(active: str = ""):
     st.markdown("""
     <style>
     /* Style all page_link buttons to look like neon nav items */
-    [data-testid="stPageLink"] > a {
-        display: inline-flex !important;
+    /* Nav link styling — both rows */
+    [data-testid="stPageLink"] a,
+    [data-testid="stPageLink"] a:visited {
+        display: flex !important;
         align-items: center !important;
-        padding: 5px 12px !important;
-        border-radius: 6px !important;
+        justify-content: center !important;
+        padding: 4px 6px !important;
+        border-radius: 5px !important;
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.62rem !important;
+        font-size: 0.58rem !important;
         font-weight: 500 !important;
-        color: rgba(160,185,205,0.5) !important;
-        letter-spacing: 0.1em !important;
+        color: rgba(160,185,205,0.45) !important;
+        letter-spacing: 0.06em !important;
         text-transform: uppercase !important;
         border: 1px solid transparent !important;
         text-decoration: none !important;
         transition: all 0.15s !important;
         background: transparent !important;
         white-space: nowrap !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
-    [data-testid="stPageLink"] > a:hover {
+    [data-testid="stPageLink"] a:hover {
         color: #00f0c8 !important;
         border-color: rgba(0,240,200,0.25) !important;
         background: rgba(0,240,200,0.06) !important;
-        text-shadow: 0 0 10px rgba(0,240,200,0.4) !important;
+        text-shadow: 0 0 8px rgba(0,240,200,0.4) !important;
     }
-    /* Active page */
-    [data-testid="stPageLink-active"] > a {
+    [data-testid="stPageLink-active"] a {
         color: #00f0c8 !important;
         border-color: rgba(0,240,200,0.3) !important;
-        background: rgba(0,240,200,0.08) !important;
-        text-shadow: 0 0 10px rgba(0,240,200,0.4) !important;
+        background: rgba(0,240,200,0.09) !important;
+        text-shadow: 0 0 10px rgba(0,240,200,0.5) !important;
     }
-    /* Nav row container */
-    div[data-testid="stHorizontalBlock"] > div {
-        gap: 2px !important;
-        flex-wrap: nowrap !important;
+    /* Collapse column padding so links sit flush */
+    div[data-testid="column"] {
+        padding-left: 2px !important;
+        padding-right: 2px !important;
+        min-width: 0 !important;
     }
     </style>""", unsafe_allow_html=True)
 
-    # Render nav links as a horizontal row
-    pages = [
-        ("app.py",                  "Home"),
-        ("pages/1_generate.py",     "Generate"),
-        ("pages/2_knowledge.py",    "Knowledge"),
-        ("pages/3_eval.py",         "Eval"),
-        ("pages/4_history.py",      "History"),
-        ("pages/5_health.py",       "Health"),
-        ("pages/6_vision.py",       "Vision"),
-        ("pages/7_analytics.py",    "Analytics"),
-        ("pages/8_fleet.py",        "Fleet"),
-        ("pages/9_rl_optimiser.py", "RL"),
-        ("pages/10_digital_twin.py","Twin"),
+    # ── Nav links — two rows so all pages fit and none are truncated ──────────
+    # Row 1: core pages
+    row1 = [
+        ("app.py",                   "Home"),
+        ("pages/1_generate.py",      "Generate"),
+        ("pages/2_knowledge.py",     "Knowledge"),
+        ("pages/3_eval.py",          "Eval"),
+        ("pages/4_history.py",       "History"),
+        ("pages/5_health.py",        "Health"),
+        ("pages/6_vision.py",        "Vision"),
+        ("pages/7_analytics.py",     "Analytics"),
+        ("pages/8_fleet.py",         "Fleet"),
+    ]
+    # Row 2: advanced pages
+    row2 = [
+        ("pages/9_rl_optimiser.py",  "RL Opt"),
+        ("pages/10_digital_twin.py", "Twin"),
+        ("pages/11_compare.py",      "Compare"),
+        ("pages/12_inventory.py",    "Inventory"),
+        ("pages/13_reflect.py",      "Reflect"),
+        ("pages/14_workflows.py",    "Workflows"),
+        ("pages/15_templates.py",    "Templates"),
+        ("pages/16_report.py",       "Report"),
+        ("pages/17_optimize.py",     "Optimise"),
     ]
 
-    cols = st.columns(len(pages))
-    for col, (page_file, label) in zip(cols, pages):
-        with col:
-            try:
-                st.page_link(page_file, label=label, use_container_width=True)
-            except Exception:
-                # Fallback if page_link fails (older Streamlit)
-                st.markdown(f"<span style='font-family:JetBrains Mono,monospace;font-size:0.62rem;color:rgba(160,185,205,0.4);'>{label}</span>",
-                            unsafe_allow_html=True)
+    def _nav_row(pages_list):
+        cols = st.columns(len(pages_list))
+        for col, (page_file, label) in zip(cols, pages_list):
+            with col:
+                try:
+                    st.page_link(page_file, label=label, use_container_width=True)
+                except Exception:
+                    st.markdown(
+                        f"<div style='font-family:JetBrains Mono,monospace;"
+                        f"font-size:0.58rem;color:rgba(160,185,205,0.35);"
+                        f"text-align:center;padding:4px 2px;'>{label}</div>",
+                        unsafe_allow_html=True)
 
-    st.markdown('<div style="border-bottom:1px solid rgba(0,240,200,0.06);margin-bottom:1.5rem;"></div>',
+    _nav_row(row1)
+    st.markdown('<div style="height:2px;"></div>', unsafe_allow_html=True)
+    _nav_row(row2)
+    st.markdown('<div style="border-bottom:1px solid rgba(0,240,200,0.06);margin-bottom:1.5rem;margin-top:4px;"></div>',
                 unsafe_allow_html=True)
 
 

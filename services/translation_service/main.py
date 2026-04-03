@@ -54,6 +54,15 @@ from services.rl_service.core.telemetry_store import TelemetryStore
 from services.rl_service.core.rl_engine import ProtocolOptimiser, RewardModel
 from services.rl_service.api.rl_router import router as rl_router
 
+# Phase 8+ extensions — all new modules wired to REST
+try:
+    from api.extensions_router import router as extensions_router
+    _HAS_EXTENSIONS = True
+except ImportError as _ext_err:
+    _HAS_EXTENSIONS = False
+    import structlog as _sl
+    _sl.get_logger(__name__).warning("extensions_router_unavailable", error=str(_ext_err))
+
 # Configure structured logging at import time
 configure_logging()
 log = structlog.get_logger(__name__)
@@ -85,6 +94,12 @@ async def lifespan(app: FastAPI):
         rag_engine=app.state.rag_engine,
     )
     app.state.protocol_registry = {}
+    # Protocol manager for extensions router (get/list protocols)
+    try:
+        from translation_service.core.protocol_manager import ProtocolManager
+        app.state.protocol_manager = ProtocolManager()
+    except Exception:
+        app.state.protocol_manager = None
 
     # Vision layer
     app.state.vision_engine = VisionEngine(
@@ -163,14 +178,36 @@ def create_app() -> FastAPI:
     app.include_router(fleet_router)
     app.include_router(rl_router)
 
+    # Phase 8+ extensions
+    if _HAS_EXTENSIONS:
+        app.include_router(extensions_router)
+        log.info("extensions_router_registered",
+                 routes=len([r for r in extensions_router.routes]))
+
     @app.get("/health", tags=["Observability"])
     async def health():
         stats = app.state.rag_engine.collection_stats()
+        ext_status = {}
+        if _HAS_EXTENSIONS:
+            try:
+                from api.extensions_router import (
+                    _HAS_OT2, _HAS_DIFF, _HAS_INV, _HAS_TMPL,
+                    _HAS_REPORT, _HAS_WF, _HAS_OPT, _HAS_REFLECT)
+                ext_status = {
+                    "opentrons": _HAS_OT2, "diff": _HAS_DIFF,
+                    "inventory": _HAS_INV, "templates": _HAS_TMPL,
+                    "report": _HAS_REPORT, "workflows": _HAS_WF,
+                    "optimizer": _HAS_OPT, "reflection": _HAS_REFLECT,
+                }
+            except Exception:
+                pass
         return {
-            "status":   "ok",
-            "version":  "2.0.0",
-            "sim_mode": os.getenv("AUROLAB_SIM_MODE", "pybullet"),
-            "rag":      stats,
+            "status":     "ok",
+            "version":    "2.0.0",
+            "phase":      "8+",
+            "sim_mode":   os.getenv("AUROLAB_SIM_MODE", "pybullet"),
+            "rag":        stats,
+            "extensions": ext_status,
         }
 
     @app.get("/", tags=["Observability"])
