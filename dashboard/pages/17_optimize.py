@@ -5,6 +5,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, kpi_row, divider, section_label, badge, PLOTLY_DARK
 
 st.set_page_config(page_title="Optimise — AuroLab", page_icon="⚗", layout="wide",
@@ -43,7 +44,7 @@ if run_btn:
         # Client-side heuristic fallback when API not available
         sys.path.insert(0, str(Path(__file__).parent.parent.parent))
         try:
-            from core.protocol_optimizer import ProtocolOptimiser, _estimate_time, _estimate_cost, _estimate_plastic
+            from services.translation_service.core.protocol_optimizer import ProtocolOptimiser, _estimate_time, _estimate_cost, _estimate_plastic
             # Show heuristic estimates without LLM
             orig_time    = _estimate_time(protocol)
             orig_cost    = _estimate_cost(protocol)

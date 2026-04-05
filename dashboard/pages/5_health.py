@@ -1,159 +1,235 @@
-"""dashboard/pages/5_health.py — System Health"""
-
-import time, sys
+"""dashboard/pages/5_health.py — System Health Monitor"""
+import sys
+import time
 from pathlib import Path
-from collections import Counter
-import streamlit as st
+
 import plotly.graph_objects as go
+import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from shared import inject_css, render_nav, hero, api_get, api_post, api_delete, kpi_row, kpi_card, page_header, divider, section_label, badge, stats_strip, neon_card, render_step_card, render_protocol_header, export_buttons, PLOTLY_DARK
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
+from shared import (inject_css, render_nav, hero, kpi_row,
+                    divider, section_label, badge, API_BASE, PLOTLY_DARK)
 
-st.set_page_config(page_title="Health — AuroLab", page_icon="⚗", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Health — AuroLab", page_icon="⚗",
+                   layout="wide", initial_sidebar_state="collapsed")
 inject_css()
 render_nav("health")
 
-def probe(path):
-    import httpx
+hero("SYSTEM HEALTH",
+     "Live endpoint probing, latency tracking, RAG stats, extension status",
+     accent="#4ade80", tag="API · RAG · Extensions · Latency")
+
+import httpx
+from datetime import datetime
+
+def probe(path: str, method: str = "GET", body: dict = None):
     t0 = time.perf_counter()
     try:
-        r = httpx.get(f"http://localhost:8080{path}", timeout=4.0)
-        ms = (time.perf_counter()-t0)*1000
-        return r.status_code==200, ms, (r.json() if r.status_code==200 else None)
-    except:
-        return False, -1.0, None
+        if method == "POST":
+            r = httpx.post(f"{API_BASE}{path}", json=body or {}, timeout=8.0)
+        else:
+            r = httpx.get(f"{API_BASE}{path}", timeout=8.0)
+        ms = round((time.perf_counter() - t0) * 1000)
+        ok = r.status_code < 400
+        try:    data = r.json()
+        except: data = {}
+        return ok, ms, data
+    except Exception as e:
+        ms = round((time.perf_counter() - t0) * 1000)
+        return False, ms, {"error": str(e)}
 
-page_header("System Health", "Live diagnostics — service status, RAG configuration, latency history.")
+ENDPOINTS = [
+    ("/health",               "API gateway",          "GET"),
+    ("/api/v1/protocols/",    "Protocol list",        "GET"),
+    ("/api/v1/documents/",    "Document list",        "GET"),
+    ("/api/v1/rag/stats",     "RAG stats",            "GET"),
+    ("/api/v1/inventory/",    "Inventory",            "GET"),
+    ("/api/v1/templates/",    "Templates",            "GET"),
+    ("/api/v1/workflows/",    "Workflows",            "GET"),
+    ("/api/v1/extensions/status", "Extensions",       "GET"),
+    ("/api/v1/scheduler/jobs","Scheduler jobs",       "GET"),
+    ("/api/v1/starred",       "Starred protocols",    "GET"),
+]
 
-auto = st.checkbox("Auto-refresh every 10s", value=False)
-if st.button("⟳ Refresh now"): st.rerun()
+# ── Probe all endpoints ───────────────────────────────────────────────────────
+with st.spinner("Probing endpoints..."):
+    results = {}
+    for path, label, method in ENDPOINTS:
+        ok, ms, data = probe(path, method)
+        results[label] = {"ok": ok, "ms": ms, "data": data, "path": path}
+
+health_d = results.get("API gateway", {}).get("data", {})
+rag      = health_d.get("rag", {})
+ext      = health_d.get("extensions", {})
+services = health_d.get("services", {})
+
+ok_count  = sum(1 for v in results.values() if v["ok"])
+avg_ms    = round(sum(v["ms"] for v in results.values()) / max(len(results), 1))
+api_online = results.get("API gateway", {}).get("ok", False)
+
+# ── KPIs ─────────────────────────────────────────────────────────────────────
+kpi_row([
+    (f"{ok_count}/{len(results)}", "Endpoints OK",   "#4ade80" if ok_count == len(results) else "#ffd33d"),
+    (f"{avg_ms}ms",               "Avg latency",     "#4ade80" if avg_ms < 200 else "#ffd33d"),
+    (rag.get("total_chunks","—"), "KB Chunks",       "#00f0c8"),
+    ("ONLINE" if api_online else "OFFLINE", "API status",
+     "#4ade80" if api_online else "#f87171"),
+])
 divider()
 
-PROBES = [
-    ("/health",               "API gateway"),
-    ("/api/v1/documents/",    "Document registry"),
-    ("/api/v1/fleet/status",  "Fleet orchestrator"),
-    ("/api/v1/rl/overview",   "RL service"),
-]
-results = {}
-for path, label in PROBES:
-    ok, ms, data = probe(path)
-    results[label] = {"ok":ok, "ms":ms, "data":data}
+# ── Latency chart ─────────────────────────────────────────────────────────────
+section_label("Endpoint latency")
+labels = [v for v in results.keys()]
+ms_vals = [results[v]["ms"] for v in labels]
+colors  = ["#4ade80" if results[v]["ok"] else "#f87171" for v in labels]
 
-# ── KPIs ───────────────────────────────────────────────────────────────────
-api_ms  = results["API gateway"]["ms"]
-health_d = results["API gateway"].get("data") or {}
-rag = health_d.get("rag",{})
-chunks = rag.get("total_chunks",0)
-docs_d = (results["Document registry"].get("data") or {})
-docs   = docs_d.get("documents",[]) if isinstance(docs_d,dict) else []
-protocols_n = len(st.session_state.get("protocol_history",[]))
+fig = go.Figure(go.Bar(
+    x=labels, y=ms_vals,
+    marker_color=colors, marker_line_width=0,
+    text=[f"{m}ms" for m in ms_vals],
+    textposition="outside",
+    textfont=dict(color="rgba(160,185,205,0.6)", size=9, family="JetBrains Mono"),
+))
+fig.add_hline(y=200, line=dict(color="rgba(255,211,61,0.4)", width=1, dash="dot"),
+              annotation_text="200ms threshold",
+              annotation_font_color="rgba(255,211,61,0.5)")
+fig.update_layout(
+    **PLOTLY_DARK,
+    xaxis=dict(tickfont=dict(size=9)),
+    yaxis=dict(title="ms", gridcolor="rgba(0,240,200,0.05)"),
+    height=260, margin=dict(l=8,r=8,t=32,b=8),
+    title=dict(text="Response time per endpoint",
+               font=dict(color="rgba(160,185,205,0.5)",size=11)),
+)
+st.plotly_chart(fig, use_container_width=True)
+divider()
 
-# Track latency
-if "lat_hist" not in st.session_state: st.session_state.lat_hist = []
-if results["API gateway"]["ok"]:
-    st.session_state.lat_hist.append(api_ms)
-    if len(st.session_state.lat_hist) > 80: st.session_state.lat_hist.pop(0)
+# ── Endpoint status table ─────────────────────────────────────────────────────
+section_label("Endpoint status")
+for label, v in results.items():
+    ok  = v["ok"]
+    ms  = v["ms"]
+    col = "#4ade80" if ok else "#f87171"
+    icon = "✓" if ok else "✗"
+    bar_w = min(ms / 5, 100)
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:12px;padding:7px 12px;
+        background:rgba(0,240,200,0.01);border:1px solid rgba(0,240,200,0.06);
+        border-radius:8px;margin:3px 0;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;
+            color:{col};min-width:18px;">{icon}</span>
+        <span style="font-size:0.82rem;color:#d0e4f0;flex:1;">{label}</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;
+            color:rgba(160,185,205,0.35);min-width:80px;text-align:right;">{v['path']}</span>
+        <div style="width:80px;background:rgba(255,255,255,0.04);
+            border-radius:2px;height:4px;overflow:hidden;">
+            <div style="background:{col};height:100%;width:{bar_w}%;
+                box-shadow:0 0 4px {col};"></div>
+        </div>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;
+            color:{col};min-width:52px;text-align:right;">{ms}ms</span>
+    </div>""", unsafe_allow_html=True)
 
-all_ok = all(r["ok"] for r in results.values())
-status_val = "ALL SYSTEMS GO" if all_ok else f"{sum(1 for r in results.values() if r['ok'])}/{len(results)} ONLINE"
-status_col = "#4ade80" if all_ok else "#fbbf24"
+divider()
 
-st.markdown(f"""
-<div style="background:#0c0c14;border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:1.1rem 1.4rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:16px;">
-    <div class="{'dot-green' if all_ok else 'dot-amber'}"></div>
-    <div style="font-family:'JetBrains Mono',monospace;font-size:0.85rem;font-weight:500;color:{status_col};">{status_val}</div>
-    <div style="flex:1;"></div>
-    <div style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:#444458;">{time.strftime('%H:%M:%S')}</div>
-</div>""", unsafe_allow_html=True)
-
-kpi_row([
-    (f"{api_ms:.0f}ms" if api_ms>0 else "—", "API latency",         "#00f0c8"),
-    (f"{chunks:,}",                            "Chunks indexed",      "#6c4cdc"),
-    (len(docs),                                "Documents ready",     "#00b8ff"),
-    (protocols_n,                              "Protocols generated", "#ffd33d"),
-])
-
-left, right = st.columns([1, 2], gap="large")
+# ── RAG + Services status ─────────────────────────────────────────────────────
+left, right = st.columns(2, gap="large")
 
 with left:
-    section_label("Service status")
-    for label, res in results.items():
-        dot = "dot-green" if res["ok"] else "dot-red"
-        ms_str = f"{res['ms']:.1f}ms" if res["ms"]>=0 else "timeout"
-        st.markdown(f"""
-        <div class="health-row">
-            <div class="{dot}"></div>
-            <div class="health-label">{label}</div>
-            <div class="health-value">{ms_str}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_label("RAG configuration")
-    flags = [
-        ("HyDE expansion",      rag.get("hyde_enabled",False)),
-        ("Cross-encoder rerank", rag.get("reranker_enabled",False)),
-        ("Hybrid BM25",          rag.get("hybrid_enabled",True)),
+    section_label("RAG knowledge base")
+    rag_items = [
+        ("Total chunks",   rag.get("total_chunks", "—")),
+        ("Documents",      rag.get("total_documents", "—")),
+        ("Embedding model",rag.get("embed_model", "all-MiniLM-L6-v2")),
+        ("HyDE enabled",   str(rag.get("hyde_enabled", True))),
+        ("Reranker",       str(rag.get("reranker_enabled", True))),
+        ("Collection",     rag.get("collection", "aurolab_protocols")),
     ]
-    for name, on in flags:
-        cls = "flag-on" if on else "flag-off"
+    for k, v in rag_items:
         st.markdown(f"""
-        <div class="health-row">
-            <div class="health-label">{name}</div>
-            <span class="{cls}">{'ON' if on else 'OFF'}</span>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    section_label("Vector store")
-    for k, v in [
-        ("Collection",   rag.get("collection","—")),
-        ("Embed model",  rag.get("embed_model","—").split("/")[-1]),
-        ("Total chunks", f"{chunks:,}"),
-        ("Sim mode",     health_d.get("sim_mode","—")),
-    ]:
-        st.markdown(f"""
-        <div class="health-row">
-            <div class="health-label">{k}</div>
-            <div class="health-value">{v}</div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;
+            border-bottom:1px solid rgba(0,240,200,0.05);">
+            <span style="font-size:0.78rem;color:rgba(160,185,205,0.4);">{k}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;
+                color:#00f0c8;">{v}</span>
         </div>""", unsafe_allow_html=True)
 
 with right:
-    section_label("API latency history")
-    lat = st.session_state.lat_hist
-    if len(lat) >= 2:
-        avg = sum(lat)/len(lat)
-        p95 = sorted(lat)[int(len(lat)*0.95)]
-        col_line = "#4ade80" if avg < 200 else ("#fbbf24" if avg < 500 else "#f87171")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(y=lat, mode="lines",
-            line=dict(color=col_line, width=1.5),
-            fill="tozeroy", fillcolor=f"rgba({','.join(str(int(x)) for x in bytes.fromhex(col_line[1:]))},0.07)"))
-        fig.add_hline(y=avg, line=dict(color="#7c6af7", width=1, dash="dot"),
-            annotation_text=f"avg {avg:.0f}ms", annotation_font_color="#7c6af7")
-        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="JetBrains Mono, monospace", color="rgba(160,185,205,0.5)", size=10), legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="rgba(160,185,205,0.6)", size=10)), margin=dict(l=8, r=8, t=36, b=8), hoverlabel=dict(bgcolor="#0a1018", bordercolor="rgba(0,240,200,0.3)", font=dict(family="JetBrains Mono, monospace", color="#d0e4f0")), height=200, showlegend=False,
-            title=dict(text=f"Response time · p95={p95:.0f}ms", font=dict(color="#555568",size=11)))
-        st.plotly_chart(fig, use_container_width=True)
+    section_label("Backend services")
+    svc_labels = {
+        "rag_llm":   "RAG + LLM Engine",
+        "execution": "Physics Simulation",
+        "vision":    "Vision AI",
+        "analytics": "Analytics Engine",
+        "fleet":     "Fleet Orchestration",
+        "rl":        "RL Agent",
+    }
+    if services:
+        for key, label in svc_labels.items():
+            ok  = services.get(key, False)
+            col = "#4ade80" if ok else "#f87171"
+            st.markdown(f"""
+            <div style="display:flex;align-items:center;gap:10px;padding:6px 0;
+                border-bottom:1px solid rgba(0,240,200,0.05);">
+                <span style="color:{col};font-size:0.85rem;">{'●' if ok else '○'}</span>
+                <span style="font-size:0.78rem;color:#d0e4f0;flex:1;">{label}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;
+                    color:{col};">{'ONLINE' if ok else 'OFFLINE'}</span>
+            </div>""", unsafe_allow_html=True)
     else:
-        st.markdown("<div style='color:#444458;font-size:0.8rem;text-align:center;padding:2rem;'>No latency data — make API requests first</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-family:JetBrains Mono,monospace;font-size:0.75rem;"
+                    "color:rgba(160,185,205,0.3);'>Start backend to see service status</div>",
+                    unsafe_allow_html=True)
 
-    if docs:
-        section_label("Document types")
-        counts = Counter(d.get("doc_type","unknown") for d in docs)
-        colors = ["#7c6af7","#4ade80","#60a5fa","#fbbf24","#f87171"]
-        fig2 = go.Figure(go.Bar(
-            x=list(counts.keys()), y=list(counts.values()),
-            marker_color=colors[:len(counts)], marker_line_width=0))
-        fig2.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="JetBrains Mono, monospace", color="rgba(160,185,205,0.5)", size=10), legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="rgba(160,185,205,0.6)", size=10)), margin=dict(l=8, r=8, t=36, b=8), hoverlabel=dict(bgcolor="#0a1018", bordercolor="rgba(0,240,200,0.3)", font=dict(family="JetBrains Mono, monospace", color="#d0e4f0")), height=180, showlegend=False,
-            title=dict(text="Docs by type", font=dict(color="#555568",size=11)))
-        st.plotly_chart(fig2, use_container_width=True)
+divider()
 
-    if len(lat) >= 2:
-        section_label("Latency distribution")
-        fig3 = go.Figure(go.Histogram(x=lat, nbinsx=15,
-            marker_color="#7c6af7", marker_line_width=0, opacity=0.8))
-        fig3.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="JetBrains Mono, monospace", color="rgba(160,185,205,0.5)", size=10), legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="rgba(160,185,205,0.6)", size=10)), margin=dict(l=8, r=8, t=36, b=8), hoverlabel=dict(bgcolor="#0a1018", bordercolor="rgba(0,240,200,0.3)", font=dict(family="JetBrains Mono, monospace", color="#d0e4f0")), height=160, showlegend=False,
-            title=dict(text="Response time distribution (ms)", font=dict(color="#555568",size=11)))
-        st.plotly_chart(fig3, use_container_width=True)
+# ── Extensions status ─────────────────────────────────────────────────────────
+section_label("Phase 8+ extensions")
+ext_labels = {
+    "opentrons":  "Opentrons OT-2 Exporter",
+    "diff":       "Protocol Diff Engine",
+    "inventory":  "Reagent Inventory",
+    "templates":  "Protocol Templates",
+    "report":     "Report Generator",
+    "workflows":  "Workflow Engine",
+    "optimizer":  "Protocol Optimizer",
+    "reflection": "LLM Reflection",
+    "bundle":     "Export Bundle",
+    "batch":      "Batch Generator",
+    "notes":      "Lab Notebook",
+    "param_validator": "Parameter Validator",
+    "eln_exporter":    "ELN Exporter",
+    "scheduler":       "Job Scheduler",
+}
+if ext:
+    cols = st.columns(3, gap="small")
+    items = list(ext_labels.items())
+    per_col = (len(items) + 2) // 3
+    for ci, col in enumerate(cols):
+        for key, label in items[ci*per_col:(ci+1)*per_col]:
+            ok  = ext.get(key, False)
+            col_c = "#4ade80" if ok else "#f87171"
+            col.markdown(f"""
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 0;
+                border-bottom:1px solid rgba(0,240,200,0.04);">
+                <span style="color:{col_c};font-size:0.75rem;">{'✓' if ok else '✗'}</span>
+                <span style="font-size:0.72rem;color:rgba(160,185,205,0.6);">{label}</span>
+            </div>""", unsafe_allow_html=True)
+else:
+    st.markdown("<div style='font-family:JetBrains Mono,monospace;font-size:0.75rem;"
+                "color:rgba(160,185,205,0.3);'>Start backend to see extension status</div>",
+                unsafe_allow_html=True)
 
-if auto:
-    time.sleep(10); st.rerun()
+divider()
+
+# ── Refresh button ────────────────────────────────────────────────────────────
+rc1, rc2, _ = st.columns([1, 1, 4])
+with rc1:
+    if st.button("🔄 Refresh all probes", type="primary", use_container_width=True):
+        st.rerun()
+with rc2:
+    st.markdown(f"<div style='font-family:JetBrains Mono,monospace;font-size:0.62rem;"
+                f"color:rgba(160,185,205,0.3);padding-top:10px;'>"
+                f"Last probe: {datetime.now().strftime('%H:%M:%S')}</div>",
+                unsafe_allow_html=True)

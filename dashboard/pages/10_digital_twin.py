@@ -3,10 +3,17 @@ dashboard/pages/10_digital_twin.py - AuroLab OT-2 Digital Twin
 Full 3D robot simulation. No GPU required. Three.js r128.
 """
 import json
+import sys
+from pathlib import Path as _Path
+sys.path.insert(0, str(_Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(_Path(__file__).parent.parent.parent / 'dashboard'))
 import streamlit as st
 import httpx
+from shared import inject_css, render_nav, api_get as _api_get
 
-st.set_page_config(page_title="Digital Twin - AuroLab", page_icon="!", layout="wide")
+st.set_page_config(page_title="Digital Twin - AuroLab", page_icon="⚗", layout="wide", initial_sidebar_state="collapsed")
+inject_css()
+render_nav("twin")
 
 API_BASE = "http://localhost:8080"
 

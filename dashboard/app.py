@@ -1,102 +1,141 @@
-"""dashboard/app.py — AuroLab Home · Futuristic UI"""
+"""dashboard/app.py — AuroLab Home"""
 import sys
 from pathlib import Path
 import streamlit as st
+sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
+from shared import inject_css, render_nav, hero, api_get, kpi_row, divider, section_label, badge
 
-sys.path.insert(0, str(Path(__file__).parent))
-from shared import inject_css, render_nav, hero, api_get, kpi_row, divider, section_label, badge, stats_strip, neon_card, PLOTLY_DARK
-
-st.set_page_config(page_title="AuroLab", page_icon="⚗", layout="wide",
-                   initial_sidebar_state="collapsed")
+st.set_page_config(page_title="AuroLab", page_icon="⚗", layout="wide", initial_sidebar_state="collapsed")
 inject_css()
-render_nav("app")
+render_nav("home")
 
-hero("AUROLAB",
-     "Autonomous physical AI — natural language to validated robotic protocols in under 3 seconds",
-     accent="#00f0c8", tag="Autonomous Physical AI · v2.0")
+# Hero
+st.markdown("""
+<div style="text-align:center;padding:2.5rem 0 1.5rem;">
+    <div style="font-family:'Orbitron',monospace;font-size:2.8rem;font-weight:900;
+        color:#e8f4ff;letter-spacing:0.08em;line-height:1.1;margin-bottom:0.75rem;">
+        AURO<span style="color:#00f0c8;">·</span>LAB
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;letter-spacing:0.3em;
+        color:rgba(0,240,200,0.6);text-transform:uppercase;margin-bottom:1.2rem;">
+        Autonomous Physical AI · Lab Automation
+    </div>
+    <div style="font-size:1rem;color:rgba(160,185,205,0.55);max-width:580px;margin:0 auto;line-height:1.7;">
+        Natural language → validated robotic protocols in under 3 seconds.
+        RAG retrieval · LLM generation · PyBullet simulation · RL optimisation.
+    </div>
+</div>""", unsafe_allow_html=True)
 
-health_data = api_get("/health", silent=True) or {}
-rag     = health_data.get("rag", {})
-docs_d  = api_get("/api/v1/documents/", silent=True) or {}
-history = st.session_state.get("protocol_history", [])
+# Live stats from API
+health = api_get("/health", silent=True) or {}
+services = health.get("services", {})
+rag      = health.get("rag", {})
+ext      = health.get("extensions", {})
+
+all_ok = all(services.values()) if services else False
+status_color = "#4ade80" if all_ok else ("#ffd33d" if any(services.values()) else "#f87171")
+status_text  = "ALL SYSTEMS ONLINE" if all_ok else ("PARTIAL" if any(services.values()) else "OFFLINE")
+
+st.markdown(f"""
+<div style="text-align:center;margin-bottom:2rem;">
+    <span style="display:inline-flex;align-items:center;gap:8px;
+        background:rgba(0,240,200,0.04);border:1px solid {status_color}33;
+        border-radius:100px;padding:6px 18px;
+        font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:{status_color};">
+        <span style="width:7px;height:7px;border-radius:50%;background:{status_color};
+            box-shadow:0 0 8px {status_color};"></span>
+        SYS · {status_text}
+    </span>
+</div>""", unsafe_allow_html=True)
 
 kpi_row([
-    (f"{rag.get('total_chunks',0):,}", "Chunks indexed",      "#00f0c8"),
-    (str(docs_d.get("total",0)),        "Documents",           "#6c4cdc"),
-    (str(len(history)),                  "Protocols generated", "#ffd33d"),
-    (rag.get("embed_model","—").split("/")[-1][:14], "Embed model", "#00b8ff"),
-    (health_data.get("sim_mode","—"),    "Sim mode",            "#a89ef8"),
+    (rag.get("total_chunks", "—"),      "KB Chunks",      "#00f0c8"),
+    (rag.get("total_documents", "—"),   "Documents",       "#6c4cdc"),
+    (len(st.session_state.get("protocol_history", [])), "Protocols", "#00b8ff"),
+    (sum(1 for v in ext.values() if v is True) if ext else "—", "Extensions", "#4ade80"),
 ])
 divider()
 
-# Feature cards with neon accent bars
-section_label("Capabilities")
-cols = st.columns(3, gap="large")
-features = [
-    ("⚗",  "RAG + LLM Generation",
-     "ChromaDB · BM25 · HyDE · cross-encoder reranking · Groq Llama 3.3-70B with [SOURCE_N] citation injection",
-     "linear-gradient(90deg,#6c4cdc,#00f0c8)"),
-    ("🔬", "Physics Simulation",
-     "PyBullet CPU · OT-2 deck geometry · 12 slots · collision detection · mock / pybullet / live modes",
-     "linear-gradient(90deg,#00f0c8,#00b8ff)"),
-    ("🧠", "RL Optimisation",
-     "Q-learning agent · SQLite telemetry · reward = speed×0.30 + accuracy×0.35 + waste×0.20 + safety×0.15",
-     "linear-gradient(90deg,#f87171,#ffd33d)"),
-    ("🤖", "Fleet Orchestration",
-     "EDF scheduler · resource conflict detection and resolution · Gantt timeline · multi-robot parallelism",
-     "linear-gradient(90deg,#00b8ff,#6c4cdc)"),
-    ("👁", "Vision Layer",
-     "Lab state detection · mock / Groq LLaVA / NVIDIA Cosmos backends · live deck layout inspection",
-     "linear-gradient(90deg,#ffd33d,#f87171)"),
-    ("📡", "Digital Twin",
-     "Three.js 3D OT-2 · liquid particle FX · centrifuge spin · incubate glow · plate reader scan beam",
-     "linear-gradient(90deg,#00f0c8,#6c4cdc)"),
+# Pipeline overview
+section_label("5-stage pipeline")
+stages = [
+    ("#6c4cdc","01","HyDE EXPANSION",    "Instruction → hypothetical protocol excerpt → richer embedding"),
+    ("#00f0c8","02","HYBRID RETRIEVAL",  "Dense + BM25 · RRF · cross-encoder reranking"),
+    ("#00b8ff","03","LLM GENERATION",    "Groq Llama 3.3-70B · [SOURCE_N] citations · JSON schema"),
+    ("#ffd33d","04","SAFETY VALIDATION", "Pre/post checks · hazard flags · confidence score"),
+    ("#f87171","05","PHYSICS SIMULATION","PyBullet collision detection · command validation"),
 ]
-for i, (icon, title, desc, grad) in enumerate(features):
-    with cols[i % 3]:
-        st.markdown(f"""
-        <div style="
-            background:rgba(0,240,200,0.015);
-            border:1px solid rgba(0,240,200,0.08);
-            border-radius:12px;padding:1.4rem 1.5rem;
-            margin-bottom:12px;min-height:158px;
-            position:relative;overflow:hidden;
-            transition:border-color 0.2s;
-        ">
-            <div style="position:absolute;top:0;left:8px;right:8px;height:2px;background:{grad};border-radius:0 0 2px 2px;opacity:0.8;"></div>
-            <div style="position:absolute;top:8px;left:8px;width:8px;height:8px;border-top:1px solid rgba(0,240,200,0.3);border-left:1px solid rgba(0,240,200,0.3);"></div>
-            <div style="position:absolute;top:8px;right:8px;width:8px;height:8px;border-top:1px solid rgba(0,240,200,0.3);border-right:1px solid rgba(0,240,200,0.3);"></div>
-            <div style="position:absolute;bottom:8px;left:8px;width:8px;height:8px;border-bottom:1px solid rgba(0,240,200,0.3);border-left:1px solid rgba(0,240,200,0.3);"></div>
-            <div style="position:absolute;bottom:8px;right:8px;width:8px;height:8px;border-bottom:1px solid rgba(0,240,200,0.3);border-right:1px solid rgba(0,240,200,0.3);"></div>
-            <div style="font-size:1.5rem;margin-bottom:0.65rem;margin-top:0.2rem;">{icon}</div>
-            <div style="font-family:'Orbitron',monospace;font-size:0.72rem;font-weight:600;color:#e8f4ff;letter-spacing:0.06em;margin-bottom:7px;text-transform:uppercase;">{title}</div>
-            <div style="font-size:0.75rem;color:rgba(160,185,205,0.45);line-height:1.65;">{desc}</div>
-        </div>""", unsafe_allow_html=True)
+cols = st.columns(5, gap="small")
+for col, (color, num, title, desc) in zip(cols, stages):
+    col.markdown(f"""
+    <div style="background:rgba(0,240,200,0.015);border:1px solid {color}22;
+        border-top:2px solid {color};border-radius:0 0 10px 10px;
+        padding:0.9rem 0.8rem;height:140px;">
+        <div style="font-family:'Orbitron',monospace;font-size:0.55rem;
+            color:{color};margin-bottom:4px;letter-spacing:0.1em;">{num}</div>
+        <div style="font-family:'Orbitron',monospace;font-size:0.65rem;font-weight:700;
+            color:#e8f4ff;margin-bottom:6px;">{title}</div>
+        <div style="font-size:0.68rem;color:rgba(160,185,205,0.45);line-height:1.5;">{desc}</div>
+    </div>""", unsafe_allow_html=True)
 
 divider()
-stats_strip([
-    ("Phases", "7/7"), ("Tests", "243"), ("Endpoints", "28"),
-    ("Dashboard", "10 pages"), ("Latency", "<3s"),
-    ("Model", "Llama-3.3-70B"), ("Physics", "PyBullet"), ("Version", "2.0.0"),
-])
 
-if history:
+# Services status
+section_label("Services")
+service_labels = {
+    "rag_llm":   ("RAG + LLM",   "#00f0c8"),
+    "execution": ("Simulation",  "#6c4cdc"),
+    "vision":    ("Vision AI",   "#00b8ff"),
+    "analytics": ("Analytics",   "#ffd33d"),
+    "fleet":     ("Fleet Orch.", "#f87171"),
+    "rl":        ("RL Agent",    "#4ade80"),
+}
+if services:
+    scols = st.columns(len(service_labels), gap="small")
+    for col, (key, (label, color)) in zip(scols, service_labels.items()):
+        ok = services.get(key, False)
+        sc = "#4ade80" if ok else "#f87171"
+        col.markdown(f"""
+        <div style="text-align:center;padding:0.6rem;background:rgba(0,240,200,0.01);
+            border:1px solid {sc}22;border-radius:8px;">
+            <div style="font-size:1rem;margin-bottom:4px;">{'✓' if ok else '✗'}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:{sc};">{label}</div>
+        </div>""", unsafe_allow_html=True)
+else:
+    st.markdown("""<div style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;
+        color:rgba(160,185,205,0.3);text-align:center;padding:1rem;">
+        Start uvicorn to see live service status</div>""", unsafe_allow_html=True)
+
+divider()
+
+# Quick start
+section_label("Quick start")
+st.code("""# Terminal 1 — Backend
+uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+
+# Terminal 2 — Dashboard
+streamlit run dashboard/app.py
+
+# Smoke test
+python mock_test.py
+
+# Full test suite
+pytest tests/test_phase8_extensions.py -v""", language="bash")
+
+# Recent protocols
+if st.session_state.get("protocol_history"):
     divider()
-    section_label("Recent protocols")
-    for p in history[:5]:
+    section_label(f"Recent protocols ({len(st.session_state.protocol_history)})")
+    for p in st.session_state.protocol_history[:4]:
         safety = p.get("safety_level","safe")
         conf   = p.get("confidence_score",0)
-        steps  = len(p.get("steps",[]))
-        glow   = "#00f0c8" if conf > 0.8 else "#ffd33d"
         st.markdown(f"""
-        <div style="display:flex;align-items:center;gap:14px;padding:10px 14px;
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;
             background:rgba(0,240,200,0.015);border:1px solid rgba(0,240,200,0.07);
-            border-radius:8px;margin:5px 0;transition:background 0.15s;">
-            <div style="width:3px;height:36px;background:linear-gradient(180deg,#00f0c8,transparent);border-radius:2px;flex-shrink:0;"></div>
-            <div style="flex:1;">
-                <div style="font-family:'Orbitron',monospace;font-size:0.78rem;font-weight:600;color:#e8f4ff;margin-bottom:3px;letter-spacing:0.03em;">{p.get('title','Untitled')}</div>
-                <div style="font-family:'JetBrains Mono',monospace;font-size:0.62rem;color:rgba(160,185,205,0.35);">{steps} steps · {conf:.0%} confidence</div>
-            </div>
-            <div style="font-family:'Orbitron',monospace;font-size:0.85rem;font-weight:700;color:{glow};text-shadow:0 0 10px {glow};">{conf:.0%}</div>
+            border-radius:8px;margin:3px 0;">
+            <div style="flex:1;font-size:0.85rem;color:#d0e4f0;">{p.get('title','?')}</div>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:0.65rem;
+                color:rgba(160,185,205,0.35);">{conf:.0%}</span>
             {badge(safety.upper(), safety)}
         </div>""", unsafe_allow_html=True)

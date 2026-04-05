@@ -101,17 +101,17 @@ def tmp_db(tmp_path):
 class TestOT2Exporter:
 
     def test_import(self):
-        from core.opentrons_exporter import export_opentrons_script, export_opentrons_json
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script, export_opentrons_json
         assert callable(export_opentrons_script)
         assert callable(export_opentrons_json)
 
     def test_script_is_valid_python(self, sample_protocol):
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         script = export_opentrons_script(sample_protocol)
         compile(script, "<test>", "exec")   # raises SyntaxError if invalid
 
     def test_script_has_required_elements(self, sample_protocol):
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         script = export_opentrons_script(sample_protocol)
         assert "from opentrons import protocol_api" in script
         assert "metadata = {" in script
@@ -123,23 +123,23 @@ class TestOT2Exporter:
         assert "protocol.pause" in script   # for incubate/centrifuge
 
     def test_script_contains_protocol_title(self, sample_protocol):
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         script = export_opentrons_script(sample_protocol)
         assert sample_protocol["title"] in script
 
     def test_script_contains_protocol_id(self, sample_protocol):
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         script = export_opentrons_script(sample_protocol)
         assert sample_protocol["protocol_id"][:8] in script
 
     def test_pipette_selection_p300(self, sample_protocol):
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         script = export_opentrons_script(sample_protocol)
         assert "p300" in script.lower()
 
     def test_pipette_selection_p20_small_volumes(self, sample_protocol):
         import copy
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         p = copy.deepcopy(sample_protocol)
         for step in p["steps"]:
             if step.get("volume_ul"):
@@ -149,7 +149,7 @@ class TestOT2Exporter:
         assert "p20" in script.lower() or "p300" in script.lower()  # either valid
 
     def test_json_export_schema(self, sample_protocol):
-        from core.opentrons_exporter import export_opentrons_json
+        from services.translation_service.core.opentrons_exporter import export_opentrons_json
         result = export_opentrons_json(sample_protocol)
         assert "schemaVersion" in result
         assert result["schemaVersion"] == 6
@@ -158,7 +158,7 @@ class TestOT2Exporter:
         assert result["metadata"]["protocolName"] == sample_protocol["title"]
 
     def test_handles_protocol_with_no_steps(self):
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         p = {"protocol_id": "empty", "title": "Empty", "description": "",
              "steps": [], "reagents": [], "equipment": [],
              "safety_level": "safe", "safety_notes": [], "confidence_score": 0.5,
@@ -167,7 +167,7 @@ class TestOT2Exporter:
         assert "def run(protocol" in script
 
     def test_safety_warning_in_script(self):
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         p = {"protocol_id": "haz-001", "title": "Hazardous Test", "description": "",
              "steps": [{"step_number": 1, "instruction": "Add HCl", "volume_ul": 100,
                         "citations": ["GENERAL"], "safety_note": None}],
@@ -186,12 +186,12 @@ class TestOT2Exporter:
 class TestProtocolDiff:
 
     def test_import(self):
-        from core.protocol_diff import diff_protocols, ProtocolDiff, StepDiff
+        from services.translation_service.core.protocol_diff import diff_protocols, ProtocolDiff, StepDiff
         assert callable(diff_protocols)
 
     def test_identical_protocols_high_similarity(self, sample_protocol):
         import copy
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         p2 = copy.deepcopy(sample_protocol)
         p2["protocol_id"] = str(uuid.uuid4())
         diff = diff_protocols(sample_protocol, p2)
@@ -201,36 +201,36 @@ class TestProtocolDiff:
         assert diff.steps_removed == 0
 
     def test_added_step_detected(self, sample_protocol, modified_protocol):
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         diff = diff_protocols(sample_protocol, modified_protocol)
         assert diff.step_count_b == diff.step_count_a + 1
         assert diff.steps_added == 1
 
     def test_confidence_comparison(self, sample_protocol, modified_protocol):
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         diff = diff_protocols(sample_protocol, modified_protocol)
         assert diff.confidence_a == sample_protocol["confidence_score"]
         assert diff.confidence_b == modified_protocol["confidence_score"]
         assert diff.confidence_a > diff.confidence_b
 
     def test_recommendation_prefers_higher_confidence(self, sample_protocol, modified_protocol):
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         diff = diff_protocols(sample_protocol, modified_protocol)
         assert "A preferred" in diff.recommendation
 
     def test_reagent_diff(self, sample_protocol, modified_protocol):
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         diff = diff_protocols(sample_protocol, modified_protocol)
         assert len(diff.reagents_shared) >= 4   # all original reagents shared
         assert len(diff.reagents_only_b) == 1   # "Linear regression software" only in B
 
     def test_similarity_score_range(self, sample_protocol, modified_protocol):
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         diff = diff_protocols(sample_protocol, modified_protocol)
         assert 0.0 <= diff.similarity_score <= 1.0
 
     def test_completely_different_protocols_low_similarity(self, sample_protocol):
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         p2 = {
             "protocol_id": str(uuid.uuid4()),
             "title": "Gel Electrophoresis",
@@ -254,7 +254,7 @@ class TestProtocolDiff:
         assert diff.similarity_score < 0.4
 
     def test_to_dict_serialisable(self, sample_protocol, modified_protocol):
-        from core.protocol_diff import diff_protocols
+        from services.translation_service.core.protocol_diff import diff_protocols
         diff = diff_protocols(sample_protocol, modified_protocol)
         d = diff.to_dict()
         json.dumps(d)   # must be JSON-serialisable
@@ -267,11 +267,11 @@ class TestProtocolDiff:
 class TestReagentInventory:
 
     def test_import(self):
-        from core.reagent_inventory import ReagentInventory, Reagent, InventoryCheck
+        from services.translation_service.core.reagent_inventory import ReagentInventory, Reagent, InventoryCheck
         assert ReagentInventory
 
     def test_add_and_retrieve(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         r = inv.add_reagent("BCA Protein Assay Reagent A", 100.0, "ml",
                             expiry_date="2027-06-01", location="Fridge A")
@@ -280,7 +280,7 @@ class TestReagentInventory:
         assert r.reagent_id
 
     def test_search_by_name(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("Bradford Reagent", 50.0, "ml")
         inv.add_reagent("BCA Reagent A", 100.0, "ml")
@@ -289,7 +289,7 @@ class TestReagentInventory:
         assert results[0].name == "Bradford Reagent"
 
     def test_low_stock_detection(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("Low Buffer", 5.0, "ml", minimum_stock=20.0)
         low = inv.get_low_stock()
@@ -298,7 +298,7 @@ class TestReagentInventory:
         assert low[0].is_low
 
     def test_expiry_detection(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("Expired Dye", 50.0, "ml", expiry_date="2020-01-01")
         expired = inv.get_expired()
@@ -306,14 +306,14 @@ class TestReagentInventory:
         assert expired[0].is_expired
 
     def test_not_expired_when_future_date(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("Fresh Reagent", 50.0, "ml", expiry_date="2030-12-31")
         expired = inv.get_expired()
         assert len(expired) == 0
 
     def test_delete_reagent(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         r = inv.add_reagent("Temp Reagent", 10.0, "ml")
         assert len(inv.search()) == 1
@@ -322,12 +322,12 @@ class TestReagentInventory:
         assert len(inv.search()) == 0
 
     def test_delete_nonexistent_returns_false(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         assert inv.delete("nonexistent-id") is False
 
     def test_update_quantity(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         r = inv.add_reagent("Buffer A", 100.0, "ml")
         inv.update_quantity(r.reagent_id, 45.0)
@@ -335,7 +335,7 @@ class TestReagentInventory:
         assert updated.quantity_ml == 45.0
 
     def test_check_protocol_all_available(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("BCA Protein Assay Reagent A", 100.0, "ml")
         inv.add_reagent("BCA Protein Assay Reagent B", 100.0, "ml")
@@ -347,7 +347,7 @@ class TestReagentInventory:
         assert len(result.missing) == 0
 
     def test_check_protocol_missing_reagent(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("Known Reagent Alpha", 100.0, "ml")
         result = inv.check_protocol("p2", ["Completely Unknown Compound XYZ 999"])
@@ -355,7 +355,7 @@ class TestReagentInventory:
         assert "Completely Unknown Compound XYZ 999" in result.missing
 
     def test_check_protocol_low_stock_warning(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("Low Stock Buffer Solution", 3.0, "ml", minimum_stock=10.0)
         result = inv.check_protocol("p3", ["Low Stock Buffer Solution"])
@@ -364,7 +364,7 @@ class TestReagentInventory:
         assert len(result.warnings) == 1
 
     def test_check_protocol_expired_blocks_availability(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         inv.add_reagent("Old Expired Dye Stain", 50.0, "ml", expiry_date="2019-01-01")
         result = inv.check_protocol("p4", ["Old Expired Dye Stain"])
@@ -372,7 +372,7 @@ class TestReagentInventory:
         assert "Old Expired Dye Stain" in result.expired
 
     def test_consume_reduces_quantity(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         r = inv.add_reagent("Consumable Reagent", 100.0, "ml")
         inv.consume(r.reagent_id, 30.0, protocol_id="p1")
@@ -380,7 +380,7 @@ class TestReagentInventory:
         assert updated.quantity_ml == 70.0
 
     def test_persist_across_instances(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv1 = ReagentInventory(tmp_db)
         inv1.add_reagent("Persistent Reagent", 100.0, "ml")
         inv2 = ReagentInventory(tmp_db)
@@ -389,14 +389,14 @@ class TestReagentInventory:
         assert results[0].name == "Persistent Reagent"
 
     def test_to_dict_serialisable(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         r = inv.add_reagent("Test", 100.0, "ml")
         d = r.to_dict()
         json.dumps(d)
 
     def test_hazard_class_stored(self, tmp_db):
-        from core.reagent_inventory import ReagentInventory
+        from services.translation_service.core.reagent_inventory import ReagentInventory
         inv = ReagentInventory(tmp_db)
         r = inv.add_reagent("Acid HCl", 50.0, "ml", hazard_class="corrosive")
         fetched = inv.get(r.reagent_id)
@@ -410,11 +410,11 @@ class TestReagentInventory:
 class TestWorkflowEngine:
 
     def test_import(self):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep, WorkflowRun
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep, WorkflowRun
         assert WorkflowEngine
 
     def test_create_and_retrieve_workflow(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
         eng = WorkflowEngine(tmp_db)
         steps = [
             WorkflowStep(step_index=0, name="BCA Assay",    protocol_id="p1", condition="always"),
@@ -428,7 +428,7 @@ class TestWorkflowEngine:
         assert len(wf["steps"]) == 2
 
     def test_step_conditions_preserved(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
         eng = WorkflowEngine(tmp_db)
         steps = [
             WorkflowStep(step_index=0, name="S1", protocol_id="p1", condition="always"),
@@ -442,7 +442,7 @@ class TestWorkflowEngine:
         assert wf["steps"][2]["condition"] == "on_fail"
 
     def test_list_workflows(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
         eng = WorkflowEngine(tmp_db)
         for i in range(3):
             eng.create_workflow(f"WF {i}", [
@@ -452,7 +452,7 @@ class TestWorkflowEngine:
         assert len(wfs) == 3
 
     def test_delete_workflow(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
         eng = WorkflowEngine(tmp_db)
         wid = eng.create_workflow("To Delete", [
             WorkflowStep(step_index=0, name="S", protocol_id="p1")
@@ -462,12 +462,12 @@ class TestWorkflowEngine:
         assert len(eng.list_workflows()) == 0
 
     def test_delete_nonexistent_returns_false(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine
+        from services.translation_service.core.workflow_engine import WorkflowEngine
         eng = WorkflowEngine(tmp_db)
         assert eng.delete_workflow("nonexistent") is False
 
     def test_start_run(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
         eng = WorkflowEngine(tmp_db)
         wid = eng.create_workflow("Run Test", [
             WorkflowStep(step_index=0, name="S1", protocol_id="p1")
@@ -479,7 +479,7 @@ class TestWorkflowEngine:
         assert run.results[0].status == "pending"
 
     def test_execute_step_no_protocol(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
         eng = WorkflowEngine(tmp_db)
         wid = eng.create_workflow("No Proto WF", [
             WorkflowStep(step_index=0, name="S1", protocol_id="missing-id")
@@ -490,7 +490,7 @@ class TestWorkflowEngine:
         assert "not found" in result.error
 
     def test_on_pass_condition_skips_when_prev_failed(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep, WorkflowStepResult
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep, WorkflowStepResult
         eng = WorkflowEngine(tmp_db)
         wid = eng.create_workflow("Cond WF", [
             WorkflowStep(step_index=0, name="S1", protocol_id="p1", condition="always"),
@@ -504,7 +504,7 @@ class TestWorkflowEngine:
         assert result.status == "skipped"
 
     def test_persist_across_instances(self, tmp_db):
-        from core.workflow_engine import WorkflowEngine, WorkflowStep
+        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
         eng1 = WorkflowEngine(tmp_db)
         wid  = eng1.create_workflow("Persistent WF", [
             WorkflowStep(step_index=0, name="S", protocol_id="p1")
@@ -882,7 +882,10 @@ class TestProtocolManagerPersistence:
         }
 
     def test_save_and_retrieve(self, tmp_path):
-        from translation_service.core.protocol_manager import ProtocolManager
+        try:
+            from services.translation_service.core.protocol_manager import ProtocolManager
+        except ModuleNotFoundError:
+            from services.translation_service.core.protocol_manager import ProtocolManager
         pm = ProtocolManager(str(tmp_path / "pm.db"))
         p  = self._make_protocol("BCA Test")
         pm.save(p)
@@ -891,7 +894,10 @@ class TestProtocolManagerPersistence:
         assert retrieved["title"] == "BCA Test"
 
     def test_persists_across_instances(self, tmp_path):
-        from translation_service.core.protocol_manager import ProtocolManager
+        try:
+            from services.translation_service.core.protocol_manager import ProtocolManager
+        except ModuleNotFoundError:
+            from services.translation_service.core.protocol_manager import ProtocolManager
         db = str(tmp_path / "pm.db")
         pm1 = ProtocolManager(db)
         p   = self._make_protocol("Persistent")
@@ -901,7 +907,10 @@ class TestProtocolManagerPersistence:
         assert pm2.get(p["protocol_id"])["title"] == "Persistent"
 
     def test_delete_removes_from_db(self, tmp_path):
-        from translation_service.core.protocol_manager import ProtocolManager
+        try:
+            from services.translation_service.core.protocol_manager import ProtocolManager
+        except ModuleNotFoundError:
+            from services.translation_service.core.protocol_manager import ProtocolManager
         db = str(tmp_path / "pm.db")
         pm1 = ProtocolManager(db)
         p   = self._make_protocol("To Delete")
@@ -911,7 +920,10 @@ class TestProtocolManagerPersistence:
         assert pm2.count() == 0
 
     def test_get_all_returns_newest_first(self, tmp_path):
-        from translation_service.core.protocol_manager import ProtocolManager
+        try:
+            from services.translation_service.core.protocol_manager import ProtocolManager
+        except ModuleNotFoundError:
+            from services.translation_service.core.protocol_manager import ProtocolManager
         pm = ProtocolManager(str(tmp_path / "pm.db"))
         for i in range(3):
             p = self._make_protocol(f"Protocol {i}")
@@ -922,7 +934,10 @@ class TestProtocolManagerPersistence:
         assert all_p[0]["saved_at"] >= all_p[1]["saved_at"]
 
     def test_search_by_title(self, tmp_path):
-        from translation_service.core.protocol_manager import ProtocolManager
+        try:
+            from services.translation_service.core.protocol_manager import ProtocolManager
+        except ModuleNotFoundError:
+            from services.translation_service.core.protocol_manager import ProtocolManager
         pm = ProtocolManager(str(tmp_path / "pm.db"))
         pm.save(self._make_protocol("BCA Assay"))
         pm.save(self._make_protocol("PCR Protocol"))
@@ -932,7 +947,10 @@ class TestProtocolManagerPersistence:
         assert any("BCA" in r["title"] for r in results)
 
     def test_get_versions_empty_for_new_protocol(self, tmp_path):
-        from translation_service.core.protocol_manager import ProtocolManager
+        try:
+            from services.translation_service.core.protocol_manager import ProtocolManager
+        except ModuleNotFoundError:
+            from services.translation_service.core.protocol_manager import ProtocolManager
         pm = ProtocolManager(str(tmp_path / "pm.db"))
         p  = self._make_protocol()
         pm.save(p)

@@ -4,6 +4,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, api_post, kpi_row, divider, section_label, badge, render_step_card, render_protocol_header, export_buttons, neon_card
 
 st.set_page_config(page_title="Generate — AuroLab", page_icon="⚗", layout="wide",
@@ -96,23 +97,94 @@ with right:
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 if (gen_btn or sim_btn) and len(instruction.strip()) >= 10:
-    with st.spinner("// PROCESSING"):
+    # ── Streaming generate with live progress ────────────────────────────
+    import httpx, json as _json
+    API_BASE_LOCAL = "http://localhost:8080"
+
+    stage_labels = {
+        "hyde":     ("01", "HyDE expansion",    "#6c4cdc"),
+        "retrieve": ("02", "Hybrid retrieval",   "#00f0c8"),
+        "generate": ("03", "LLM generation",     "#00b8ff"),
+        "validate": ("04", "Safety validation",  "#ffd33d"),
+        "simulate": ("05", "Physics simulation", "#f87171"),
+    }
+
+    progress_placeholder = st.empty()
+    result = None
+
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            with client.stream("POST", f"{API_BASE_LOCAL}/api/v1/generate/stream",
+                json={
+                    "instruction":    instruction.strip(),
+                    "doc_type_filter":doc_val,
+                    "top_k_chunks":   top_k,
+                    "return_sources": src_on,
+                    "run_sim":        sim_btn,
+                }) as resp:
+                if resp.status_code == 200:
+                    for line in resp.iter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        try:
+                            evt = _json.loads(line[5:].strip())
+                        except Exception:
+                            continue
+
+                        if evt.get("event") == "stage":
+                            num, label, color = stage_labels.get(
+                                evt["stage"], ("??", evt["stage"], "#888898"))
+                            pct = evt.get("pct", 0)
+                            progress_placeholder.markdown(f"""
+                            <div style="background:rgba(0,240,200,0.02);border:1px solid rgba(0,240,200,0.1);
+                                border-radius:10px;padding:1rem 1.25rem;margin:0.5rem 0;">
+                                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                                    <div style="width:24px;height:24px;border-radius:50%;
+                                        background:{color}22;border:1px solid {color};
+                                        display:flex;align-items:center;justify-content:center;">
+                                        <span style="font-family:Orbitron,monospace;font-size:0.55rem;color:{color};">{num}</span>
+                                    </div>
+                                    <span style="font-family:JetBrains Mono,monospace;font-size:0.75rem;
+                                        color:{color};letter-spacing:0.06em;">{label.upper()}</span>
+                                    <span style="font-size:0.7rem;color:rgba(160,185,205,0.4);margin-left:auto;">{pct}%</span>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.05);border-radius:2px;height:4px;overflow:hidden;">
+                                    <div style="background:{color};height:100%;width:{pct}%;
+                                        box-shadow:0 0 8px {color};transition:width 0.3s;"></div>
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+
+                        elif evt.get("event") == "complete":
+                            result = evt.get("protocol")
+                            progress_placeholder.empty()
+
+                        elif evt.get("event") == "error":
+                            progress_placeholder.empty()
+                            st.error(f"Generation error: {evt.get('message','unknown')}")
+                else:
+                    raise Exception(f"HTTP {resp.status_code}")
+
+    except Exception as e:
+        progress_placeholder.empty()
+        # Fallback to standard (non-streaming) endpoint
         result = api_post("/api/v1/generate", json={
-            "instruction": instruction.strip(),
-            "doc_type_filter": doc_val,
-            "top_k_chunks": top_k,
+            "instruction":    instruction.strip(),
+            "doc_type_filter":doc_val,
+            "top_k_chunks":   top_k,
             "return_sources": src_on,
         })
+
     if result:
         if "protocol_history" not in st.session_state:
             st.session_state.protocol_history = []
         st.session_state.protocol_history.insert(0, result)
-        st.session_state.last_protocol  = result
-        st.session_state.last_sim_result = None
-        if sim_btn:
+        st.session_state.last_protocol   = result
+        st.session_state.last_sim_result = result.pop("sim_result", None)
+        if sim_btn and not st.session_state.last_sim_result:
             pid = result.get("protocol_id","")
             with st.spinner(f"// SIMULATING [{sim_mode.upper()}]"):
-                sr = api_post(f"/api/v1/execute/{pid}", json={"sim_mode":sim_mode}, silent=True)
+                sr = api_post(f"/api/v1/execute/{pid}",
+                              json={"sim_mode":sim_mode}, silent=True)
             st.session_state.last_sim_result = sr
         st.rerun()
 
@@ -182,7 +254,7 @@ if "last_protocol" in st.session_state:
 
     # ── Opentrons OT-2 export ─────────────────────────────────────────────────
     try:
-        from core.opentrons_exporter import export_opentrons_script
+        from services.translation_service.core.opentrons_exporter import export_opentrons_script
         ot2_script = export_opentrons_script(p)
         ot2_col, _ = st.columns([1, 3])
         with ot2_col:

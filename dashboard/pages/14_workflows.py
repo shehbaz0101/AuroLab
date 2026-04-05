@@ -4,6 +4,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, api_post, kpi_row, divider, section_label, badge
 
 st.set_page_config(page_title="Workflows — AuroLab", page_icon="⚗", layout="wide",
@@ -16,16 +17,8 @@ hero("WORKFLOW CHAINS",
      accent="#a89ef8", tag="Chain · Sequence · Automate")
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-try:
-    from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
-    engine = WorkflowEngine("./data/workflows.db")
-except ImportError:
-    try:
-        from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
-        engine = WorkflowEngine("./data/workflows.db")
-    except ImportError:
-        st.error("workflow_engine module not found.")
-        st.stop()
+from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
+engine = WorkflowEngine("./data/workflows.db")
 
 history = st.session_state.get("protocol_history", [])
 workflows = engine.list_workflows()

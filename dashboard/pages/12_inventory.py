@@ -4,6 +4,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, kpi_row, divider, section_label, badge
 
 st.set_page_config(page_title="Inventory — AuroLab", page_icon="⚗", layout="wide",
@@ -17,16 +18,8 @@ hero("REAGENT INVENTORY",
 
 # Load inventory
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-try:
-    from services.translation_service.core.reagent_inventory import ReagentInventory
-    inv = ReagentInventory("./data/inventory.db")
-except ImportError:
-    try:
-        from services.translation_service.core.reagent_inventory import ReagentInventory
-        inv = ReagentInventory("./data/inventory.db")
-    except ImportError:
-        st.error("reagent_inventory module not found.")
-        st.stop()
+from services.translation_service.core.reagent_inventory import ReagentInventory
+inv = ReagentInventory("./data/inventory.db")
 
 all_reagents = inv.search()
 low_stock    = inv.get_low_stock()

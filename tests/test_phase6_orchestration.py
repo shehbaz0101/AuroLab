@@ -6,6 +6,13 @@ Run with: pytest tests/test_phase6_orchestration.py -v
 """
 
 from __future__ import annotations
+import sys as _sys
+from pathlib import Path as _Path
+_ROOT = _Path(__file__).parent.parent
+if str(_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_ROOT))
+
+
 
 import time
 import pytest

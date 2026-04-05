@@ -5,6 +5,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, kpi_row, divider, section_label, badge
 
 st.set_page_config(page_title="Compare — AuroLab", page_icon="⚗", layout="wide",
@@ -46,16 +47,9 @@ pb = opts[sel_b]
 
 # Compute diff
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-try:
-    from services.translation_service.core.protocol_diff import diff_protocols
-    diff = diff_protocols(pa, pb)
-except ImportError:
-    try:
-        from services.translation_service.core.protocol_diff import diff_protocols
-        diff = diff_protocols(pa, pb)
-    except ImportError:
-        st.error("protocol_diff module not found — copy core/protocol_diff.py to your project.")
-        st.stop()
+from services.translation_service.core.protocol_diff import diff_protocols
+
+diff = diff_protocols(pa, pb)
 
 divider()
 

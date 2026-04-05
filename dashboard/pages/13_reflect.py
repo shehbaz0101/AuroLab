@@ -4,6 +4,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, api_post, kpi_row, divider, section_label, badge, render_step_card
 
 st.set_page_config(page_title="Reflect — AuroLab", page_icon="⚗", layout="wide",

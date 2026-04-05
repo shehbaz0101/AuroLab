@@ -4,6 +4,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, kpi_row, divider, section_label, badge
 
 st.set_page_config(page_title="Templates — AuroLab", page_icon="⚗", layout="wide",
@@ -16,15 +17,8 @@ hero("PROTOCOL TEMPLATES",
      accent="#00b8ff", tag="BCA · PCR · ELISA · Western Blot · MTT · Bradford · Gel · Miniprep")
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-try:
-    from core.protocol_templates import list_templates, get_template, build_instruction_from_template
-except ImportError:
-    try:
-        from core.protocol_templates import (
-            list_templates, get_template, build_instruction_from_template)
-    except ImportError:
-        st.error("protocol_templates module not found.")
-        st.stop()
+from services.translation_service.core.protocol_templates import (
+    list_templates, get_template, build_instruction_from_template)
 
 templates = list_templates()
 

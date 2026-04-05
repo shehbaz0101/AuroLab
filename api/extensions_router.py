@@ -38,55 +38,75 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 router = APIRouter(prefix="/api/v1", tags=["Extensions"])
 
 log_import_errors: list[str] = []
+# ── Additional Phase 8+ modules ───────────────────────────────────────────────
+try:
+    from services.translation_service.core.param_validator import validate_protocol_params
+    _HAS_VALIDATOR = True
+except ImportError as e:
+    _HAS_VALIDATOR = False; log_import_errors.append(f"param_validator: {e}")
+
+try:
+    from services.translation_service.core.eln_exporter import export_csv, export_excel, export_jsonld
+    _HAS_ELN = True
+except ImportError as e:
+    _HAS_ELN = False; log_import_errors.append(f"eln_exporter: {e}")
+
+try:
+    from services.translation_service.core.scheduler_jobs import JobScheduler
+    _scheduler = JobScheduler("./data/scheduler.db")
+    _HAS_SCHEDULER = True
+except ImportError as e:
+    _HAS_SCHEDULER = False; log_import_errors.append(f"scheduler_jobs: {e}")
+
 
 # ── Safe imports ─────────────────────────────────────────────────────────────
 try:
-    from core.opentrons_exporter import export_opentrons_script, export_opentrons_json
+    from services.translation_service.core.opentrons_exporter import export_opentrons_script, export_opentrons_json
     _HAS_OT2 = True
 except ImportError as e:
     _HAS_OT2 = False; log_import_errors.append(f"opentrons_exporter: {e}")
 
 try:
-    from core.protocol_diff import diff_protocols
+    from services.translation_service.core.protocol_diff import diff_protocols
     _HAS_DIFF = True
 except ImportError as e:
     _HAS_DIFF = False; log_import_errors.append(f"protocol_diff: {e}")
 
 try:
-    from core.reagent_inventory import ReagentInventory
+    from services.translation_service.core.reagent_inventory import ReagentInventory
     _inventory = ReagentInventory("./data/inventory.db")
     _HAS_INV = True
 except ImportError as e:
     _HAS_INV = False; log_import_errors.append(f"reagent_inventory: {e}")
 
 try:
-    from core.protocol_templates import (
+    from services.translation_service.core.protocol_templates import (
         list_templates, get_template, build_instruction_from_template)
     _HAS_TMPL = True
 except ImportError as e:
     _HAS_TMPL = False; log_import_errors.append(f"protocol_templates: {e}")
 
 try:
-    from core.report_generator import generate_html_report, generate_markdown_report
+    from services.translation_service.core.report_generator import generate_html_report, generate_markdown_report
     _HAS_REPORT = True
 except ImportError as e:
     _HAS_REPORT = False; log_import_errors.append(f"report_generator: {e}")
 
 try:
-    from core.workflow_engine import WorkflowEngine, WorkflowStep
+    from services.translation_service.core.workflow_engine import WorkflowEngine, WorkflowStep
     _workflow_engine = WorkflowEngine("./data/workflows.db")
     _HAS_WF = True
 except ImportError as e:
     _HAS_WF = False; log_import_errors.append(f"workflow_engine: {e}")
 
 try:
-    from core.protocol_optimizer import ProtocolOptimiser as POpt, _estimate_time, _estimate_cost, _estimate_plastic
+    from services.translation_service.core.protocol_optimizer import ProtocolOptimiser as POpt, _estimate_time, _estimate_cost, _estimate_plastic
     _HAS_OPT = True
 except ImportError as e:
     _HAS_OPT = False; log_import_errors.append(f"protocol_optimizer: {e}")
 
 try:
-    from core.llm_reflection import LLMReflectionEngine
+    from services.translation_service.core.llm_reflection import LLMReflectionEngine
     _HAS_REFLECT = True
 except ImportError as e:
     _HAS_REFLECT = False; log_import_errors.append(f"llm_reflection: {e}")
@@ -339,7 +359,7 @@ async def reflect_on_failure(body: ReflectRequest, request: Request):
     # Auto-save revised protocol to registry if reflection succeeded
     if result.revised_protocol and result.revised_sim_passed:
         try:
-            from core.registry import ProtocolEntry
+            from services.translation_service.core.registry import ProtocolEntry
             mgr = request.app.state.protocol_manager
             mgr.save(result.revised_protocol)
         except Exception:
@@ -529,6 +549,321 @@ async def search_protocols(
 # Extensions health
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Export Bundle
+# ═══════════════════════════════════════════════════════════════════════════════
+
+try:
+    from services.translation_service.core.export_bundle import create_export_bundle, bundle_filename
+    _HAS_BUNDLE = True
+except ImportError as e:
+    _HAS_BUNDLE = False; log_import_errors.append(f"export_bundle: {e}")
+
+try:
+    from services.translation_service.core.batch_generator import BatchGenerator, RANK_WEIGHTS, _score_variant
+    _HAS_BATCH = True
+except ImportError as e:
+    _HAS_BATCH = False; log_import_errors.append(f"batch_generator: {e}")
+
+try:
+    from services.translation_service.core.protocol_notes import ProtocolNotesStore
+    _notes_store = ProtocolNotesStore("./data/notes.db")
+    _HAS_NOTES = True
+except ImportError as e:
+    _HAS_NOTES = False; log_import_errors.append(f"protocol_notes: {e}")
+
+
+@router.get("/protocols/{protocol_id}/bundle",
+    summary="Download ZIP bundle: JSON + HTML report + Markdown + OT-2 script")
+async def download_bundle(protocol_id: str, request: Request):
+    if not _HAS_BUNDLE:
+        raise HTTPException(503, "export_bundle not available")
+    p = _get_protocol(request, protocol_id)
+    bundle_bytes = create_export_bundle(p)
+    fname = bundle_filename(p)
+    from fastapi.responses import Response
+    return Response(
+        content=bundle_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+# ─── Batch Generation ─────────────────────────────────────────────────────────
+
+class BatchRequest(BaseModel):
+    instruction: str
+    n_variants:  int   = Field(default=4, ge=2, le=10)
+    top_k_chunks:int   = Field(default=5, ge=1, le=10)
+    sim_mode:    str   = "mock"
+    run_sim:     bool  = True
+    doc_type:    str | None = None
+
+
+@router.post("/batch/generate",
+    summary="Generate N protocol variants and rank by composite score")
+async def batch_generate(body: BatchRequest, request: Request):
+    if not _HAS_BATCH:
+        raise HTTPException(503, "batch_generator not available")
+    try:
+        llm = request.app.state.llm_engine
+        rag = request.app.state.rag_engine
+    except AttributeError:
+        raise HTTPException(503, "LLM/RAG engine not initialised")
+
+    # Get orchestrator if available
+    orch = None
+    try:
+        from services.execution_service.core.orchestrator import execute_protocol
+        orch = execute_protocol
+    except ImportError:
+        pass
+
+    gen    = BatchGenerator(llm, rag, orchestrator=orch, sim_mode=body.sim_mode)
+    result = gen.generate_batch(
+        instruction=body.instruction,
+        n_variants=body.n_variants,
+        top_k_chunks=body.top_k_chunks,
+        doc_type=body.doc_type,
+        run_sim=body.run_sim,
+    )
+    # Save all variants to protocol manager
+    try:
+        mgr = request.app.state.protocol_manager
+        for v in result.variants:
+            mgr.save(v.protocol)
+    except Exception:
+        pass
+    return result.to_dict()
+
+
+# ─── Protocol Notes ───────────────────────────────────────────────────────────
+
+class NoteUpsertRequest(BaseModel):
+    content: str
+
+
+class TagRequest(BaseModel):
+    tag: str
+
+
+class ExecutionLogRequest(BaseModel):
+    outcome:         str
+    operator:        str   = ""
+    observations:    str   = ""
+    deviations:      str   = ""
+    actual_time_min: float = 0.0
+    success:         bool  = False
+
+
+@router.get("/protocols/{protocol_id}/annotations",
+    summary="Get all annotations for a protocol")
+async def get_annotations(protocol_id: str):
+    if not _HAS_NOTES:
+        raise HTTPException(503, "protocol_notes not available")
+    return _notes_store.get_annotations(protocol_id)
+
+
+@router.put("/protocols/{protocol_id}/note",
+    summary="Create or update the lab note for a protocol")
+async def upsert_note(protocol_id: str, body: NoteUpsertRequest):
+    if not _HAS_NOTES:
+        raise HTTPException(503, "protocol_notes not available")
+    note = _notes_store.upsert_note(protocol_id, body.content)
+    return note.to_dict()
+
+
+@router.post("/protocols/{protocol_id}/tags",
+    summary="Add a tag to a protocol")
+async def add_tag(protocol_id: str, body: TagRequest):
+    if not _HAS_NOTES:
+        raise HTTPException(503, "protocol_notes not available")
+    ok = _notes_store.add_tag(protocol_id, body.tag)
+    return {"protocol_id": protocol_id, "tag": body.tag, "added": ok}
+
+
+@router.delete("/protocols/{protocol_id}/tags/{tag}",
+    summary="Remove a tag from a protocol")
+async def remove_tag(protocol_id: str, tag: str):
+    if not _HAS_NOTES:
+        raise HTTPException(503, "protocol_notes not available")
+    ok = _notes_store.remove_tag(protocol_id, tag)
+    return {"protocol_id": protocol_id, "tag": tag, "removed": ok}
+
+
+@router.post("/protocols/{protocol_id}/star",
+    summary="Star a protocol")
+async def star_protocol(protocol_id: str):
+    if not _HAS_NOTES: raise HTTPException(503, "protocol_notes not available")
+    _notes_store.star(protocol_id)
+    return {"protocol_id": protocol_id, "starred": True}
+
+
+@router.delete("/protocols/{protocol_id}/star",
+    summary="Unstar a protocol")
+async def unstar_protocol(protocol_id: str):
+    if not _HAS_NOTES: raise HTTPException(503, "protocol_notes not available")
+    _notes_store.unstar(protocol_id)
+    return {"protocol_id": protocol_id, "starred": False}
+
+
+@router.post("/protocols/{protocol_id}/execution-log",
+    summary="Log an execution result for a protocol")
+async def log_execution(protocol_id: str, body: ExecutionLogRequest):
+    if not _HAS_NOTES: raise HTTPException(503, "protocol_notes not available")
+    log_entry = _notes_store.log_execution(
+        protocol_id, outcome=body.outcome, operator=body.operator,
+        observations=body.observations, deviations=body.deviations,
+        actual_time_min=body.actual_time_min, success=body.success)
+    return log_entry.to_dict()
+
+
+@router.get("/tags",
+    summary="Get all unique tags with usage count")
+async def get_all_tags():
+    if not _HAS_NOTES: raise HTTPException(503, "protocol_notes not available")
+    return {"tags": _notes_store.get_all_tags()}
+
+
+@router.get("/starred",
+    summary="Get all starred protocol IDs")
+async def get_starred():
+    if not _HAS_NOTES: raise HTTPException(503, "protocol_notes not available")
+    return {"starred": _notes_store.get_starred()}
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parameter Validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ValidateParamsRequest(BaseModel):
+    protocol_id: str
+    temp_tolerance: float = 3.0
+    time_tolerance_pct: float = 0.25
+    volume_tolerance_pct: float = 0.30
+
+
+@router.post("/protocols/validate-params",
+    summary="Cross-validate protocol parameters against KB source chunks")
+async def validate_params(body: ValidateParamsRequest, request: Request):
+    if not _HAS_VALIDATOR:
+        raise HTTPException(503, "param_validator not available")
+    p = _get_protocol(request, body.protocol_id)
+    sources = p.get("sources_used", [])
+    report  = validate_protocol_params(
+        p, sources,
+        temp_tolerance=body.temp_tolerance,
+        time_tolerance_pct=body.time_tolerance_pct,
+        volume_tolerance_pct=body.volume_tolerance_pct,
+    )
+    return report.to_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ELN Export
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/protocols/{protocol_id}/export/csv",
+    summary="Export protocol steps as CSV")
+async def export_protocol_csv(protocol_id: str, request: Request):
+    if not _HAS_ELN:
+        raise HTTPException(503, "eln_exporter not available")
+    p   = _get_protocol(request, protocol_id)
+    csv = export_csv(p)
+    return PlainTextResponse(
+        content=csv, media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="protocol_{protocol_id[:8]}.csv"'})
+
+
+@router.get("/protocols/{protocol_id}/export/excel",
+    summary="Export protocol as Excel workbook (4 sheets)")
+async def export_protocol_excel(protocol_id: str, request: Request):
+    if not _HAS_ELN:
+        raise HTTPException(503, "eln_exporter not available")
+    p  = _get_protocol(request, protocol_id)
+    try:
+        xl = export_excel(p)
+    except ImportError:
+        raise HTTPException(503, "openpyxl not installed — pip install openpyxl")
+    from fastapi.responses import Response
+    return Response(
+        content=xl,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="protocol_{protocol_id[:8]}.xlsx"'})
+
+
+@router.get("/protocols/{protocol_id}/export/jsonld",
+    summary="Export protocol as JSON-LD (Bioschemas)")
+async def export_protocol_jsonld(protocol_id: str, request: Request):
+    if not _HAS_ELN:
+        raise HTTPException(503, "eln_exporter not available")
+    p = _get_protocol(request, protocol_id)
+    return PlainTextResponse(
+        content=export_jsonld(p), media_type="application/ld+json",
+        headers={"Content-Disposition": f'attachment; filename="protocol_{protocol_id[:8]}.jsonld"'})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Experiment Scheduler
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AddJobRequest(BaseModel):
+    name:        str
+    protocol_id: str
+    schedule:    str = "daily"
+    cron_expr:   str = ""
+    sim_mode:    str = "mock"
+
+
+@router.get("/scheduler/jobs",
+    summary="List all scheduled experiment jobs")
+async def list_jobs():
+    if not _HAS_SCHEDULER:
+        raise HTTPException(503, "scheduler_jobs not available")
+    return {"jobs": _scheduler.list_jobs()}
+
+
+@router.post("/scheduler/jobs",
+    summary="Add a scheduled experiment job")
+async def add_job(body: AddJobRequest):
+    if not _HAS_SCHEDULER:
+        raise HTTPException(503, "scheduler_jobs not available")
+    job = _scheduler.add_job(body.name, body.protocol_id,
+                              body.schedule, body.cron_expr, body.sim_mode)
+    return job.to_dict()
+
+
+@router.delete("/scheduler/jobs/{job_id}",
+    summary="Delete a scheduled job")
+async def delete_job(job_id: str):
+    if not _HAS_SCHEDULER:
+        raise HTTPException(503, "scheduler_jobs not available")
+    if not _scheduler.delete_job(job_id):
+        raise HTTPException(404, "Job not found")
+    return {"deleted": job_id}
+
+
+@router.post("/scheduler/jobs/{job_id}/run",
+    summary="Trigger a scheduled job immediately")
+async def run_job_now(job_id: str):
+    if not _HAS_SCHEDULER:
+        raise HTTPException(503, "scheduler_jobs not available")
+    _scheduler._execute_job(job_id)
+    return {"job_id": job_id, "triggered": True}
+
+
+@router.get("/scheduler/jobs/{job_id}/runs",
+    summary="Get run history for a job")
+async def get_job_runs(job_id: str, limit: int = 20):
+    if not _HAS_SCHEDULER:
+        raise HTTPException(503, "scheduler_jobs not available")
+    return {"runs": _scheduler.get_job_runs(job_id, limit)}
+
+
 @router.get("/extensions/status",
     summary="Check which extension modules are available")
 async def extensions_status():
@@ -542,4 +877,7 @@ async def extensions_status():
         "protocol_optimizer": _HAS_OPT,
         "llm_reflection":     _HAS_REFLECT,
         "import_errors":      log_import_errors,
+        "param_validator":    _HAS_VALIDATOR if "_HAS_VALIDATOR" in dir() else False,
+        "eln_exporter":       _HAS_ELN if "_HAS_ELN" in dir() else False,
+        "scheduler":          _HAS_SCHEDULER if "_HAS_SCHEDULER" in dir() else False,
     }

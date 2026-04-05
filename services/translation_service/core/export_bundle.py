@@ -55,7 +55,7 @@ def create_export_bundle(
 
         # ── report.html ───────────────────────────────────────────────────
         try:
-            from services.translation_service.core.report_generator import generate_html_report
+            from core.report_generator import generate_html_report
             html = generate_html_report(protocol, analytics=analytics,
                                         sim_result=sim_result, include_provenance=True)
             zf.writestr(f"{folder}/report.html", html)
@@ -65,7 +65,7 @@ def create_export_bundle(
 
         # ── report.md ─────────────────────────────────────────────────────
         try:
-            from services.translation_service.core.report_generator import generate_markdown_report
+            from core.report_generator import generate_markdown_report
             md = generate_markdown_report(protocol)
             zf.writestr(f"{folder}/report.md", md)
         except ImportError:

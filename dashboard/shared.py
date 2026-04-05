@@ -343,6 +343,11 @@ def render_nav(active: str = ""):
         ("pages/15_templates.py",    "Templates"),
         ("pages/16_report.py",       "Report"),
         ("pages/17_optimize.py",     "Optimise"),
+        ("pages/18_batch.py",        "Batch"),
+        ("pages/19_notebook.py",     "Notebook"),
+        ("pages/20_search.py",       "Search"),
+        ("pages/21_scheduler.py",    "Scheduler"),
+        ("pages/22_eln.py",          "ELN"),
     ]
 
     def _nav_row(pages_list):

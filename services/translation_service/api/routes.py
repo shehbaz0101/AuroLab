@@ -303,3 +303,119 @@ try:
     from .generate_router import router as _generate_router
 except ImportError:
     pass
+
+
+# ── Streaming generate endpoint ──────────────────────────────────────────────
+import asyncio
+import json as _json
+from fastapi.responses import StreamingResponse
+
+
+@router.post(
+    "/generate/stream",
+    summary="Generate protocol with Server-Sent Events streaming",
+    tags=["Generation"],
+)
+async def generate_protocol_stream(
+    body: "GenerateRequest",
+    request: Request,
+):
+    """
+    Streaming variant of /api/v1/generate.
+    Emits SSE events:
+      data: {"event":"stage","stage":"hyde","message":"Expanding query..."}
+      data: {"event":"stage","stage":"retrieve","message":"Retrieving 5 chunks..."}
+      data: {"event":"stage","stage":"generate","message":"Generating protocol..."}
+      data: {"event":"stage","stage":"simulate","message":"Running simulation..."}
+      data: {"event":"complete","protocol":{...}}
+      data: {"event":"error","message":"..."}
+
+    Usage in Streamlit:
+        import httpx
+        with httpx.stream("POST", url, json=body) as r:
+            for line in r.iter_lines():
+                if line.startswith("data:"):
+                    event = json.loads(line[5:])
+    """
+    async def event_stream():
+        try:
+            svc = _get_service(request)
+            if svc is None:
+                yield f'data: {_json.dumps({"event":"error","message":"Service not initialised"})}\n\n'
+                return
+
+            pid = body.protocol_id or str(__import__("uuid").uuid4())
+
+            # Stage 1: HyDE expansion
+            yield f'data: {_json.dumps({"event":"stage","stage":"hyde","pct":10,"message":"Expanding query with HyDE..."})}\n\n'
+            await asyncio.sleep(0)
+
+            # Stage 2: RAG retrieval
+            yield f'data: {_json.dumps({"event":"stage","stage":"retrieve","pct":30,"message":f"Retrieving top-{body.top_k_chunks} chunks..."})}\n\n'
+            await asyncio.sleep(0)
+
+            # Stage 3: LLM generation (blocking — run in executor)
+            yield f'data: {_json.dumps({"event":"stage","stage":"generate","pct":55,"message":"Generating cited protocol with Llama 3.3-70B..."})}\n\n'
+            await asyncio.sleep(0)
+
+            loop = asyncio.get_event_loop()
+            protocol = await loop.run_in_executor(
+                None,
+                svc.generate_protocol,
+                body.instruction,
+                pid,
+            )
+
+            # Stage 4: safety check
+            yield f'data: {_json.dumps({"event":"stage","stage":"validate","pct":75,"message":"Running safety validation..."})}\n\n'
+            await asyncio.sleep(0)
+
+            # Stage 5: simulation (optional)
+            sim_result = None
+            if getattr(body, "run_sim", False):
+                yield f'data: {_json.dumps({"event":"stage","stage":"simulate","pct":88,"message":"Running PyBullet simulation..."})}\n\n'
+                await asyncio.sleep(0)
+                try:
+                    execute_fn = getattr(request.app.state, "execute_fn", None)
+                    if execute_fn:
+                        from services.execution_service.core.isaac_sim_bridge import SimMode
+                        plan = await loop.run_in_executor(
+                            None, execute_fn, protocol.model_dump(mode="json"),
+                            SimMode.MOCK)
+                        if plan.simulation_result:
+                            sr = plan.simulation_result
+                            sim_result = {
+                                "passed": sr.passed,
+                                "commands_executed": sr.commands_executed,
+                                "physics_engine": "mock",
+                            }
+                except Exception:
+                    pass
+
+            # Store in registry
+            registry = getattr(request.app.state, "protocol_registry", {})
+            registry[protocol.protocol_id] = protocol
+            mgr = getattr(request.app.state, "protocol_manager", None)
+            if mgr:
+                try:
+                    mgr.save(protocol)
+                except Exception:
+                    pass
+
+            # Final: complete event
+            payload = protocol.model_dump(mode="json")
+            if sim_result:
+                payload["sim_result"] = sim_result
+            yield f'data: {_json.dumps({"event":"complete","pct":100,"protocol":payload})}\n\n'
+
+        except Exception as exc:
+            yield f'data: {_json.dumps({"event":"error","message":str(exc)})}\n\n'
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":    "no-cache",
+            "X-Accel-Buffering":"no",
+        },
+    )

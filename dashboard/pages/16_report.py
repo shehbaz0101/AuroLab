@@ -4,6 +4,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, kpi_row, divider, section_label, badge
 
 st.set_page_config(page_title="Report — AuroLab", page_icon="⚗", layout="wide",
@@ -25,15 +26,8 @@ if not history:
     st.stop()
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-try:
-    from core.report_generator import generate_html_report, generate_markdown_report
-except ImportError:
-    try:
-        from core.report_generator import (
-            generate_html_report, generate_markdown_report)
-    except ImportError:
-        st.error("report_generator module not found.")
-        st.stop()
+from services.translation_service.core.report_generator import (
+    generate_html_report, generate_markdown_report)
 
 opts = {f"{p.get('title','?')} — {p.get('protocol_id','')[:8]}": p for p in history}
 ca, cb = st.columns([3, 1])

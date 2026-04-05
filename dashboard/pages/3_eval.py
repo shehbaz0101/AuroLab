@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'dashboard'))
 from shared import inject_css, render_nav, hero, api_get, api_post, api_delete, kpi_row, divider, section_label, badge, stats_strip, neon_card, render_step_card, render_protocol_header, export_buttons, PLOTLY_DARK
 
 st.set_page_config(page_title="Eval — AuroLab", page_icon="⚗", layout="wide", initial_sidebar_state="collapsed")
