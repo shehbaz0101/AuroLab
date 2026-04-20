@@ -4,7 +4,7 @@
 
 [![Tests](https://img.shields.io/badge/tests-337%20passing-brightgreen)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]()
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)]()
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)]() 
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.55-red)]()
 
 ---
